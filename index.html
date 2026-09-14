@@ -524,6 +524,9 @@ function verificarAlerta(placa,tipo){
   ou remove (via API) alertas abertos que não fazem mais sentido (novo ciclo iniciado).
 */
 async function sincronizarAlertas(){
+  const paraAdicionar = [];
+  const idsParaRemover = [];
+
   for(const v of db.veiculos){
     for(const tipo of ['oleo','pastilha','embreagem']){
       const check=verificarAlerta(v.placa,tipo);
@@ -531,16 +534,19 @@ async function sincronizarAlertas(){
 
       if(check && check.deveAlertar){
         if(!abertoExistente){
-          const novo = { id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null };
-          await apiPost('addAlerta', novo);
+          paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
         }
       } else {
         if(abertoExistente){
-          await apiPost('deleteAlerta', { id: abertoExistente.id });
+          idsParaRemover.push(abertoExistente.id);
         }
       }
     }
   }
+
+  if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
+
+  await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
   await carregarDoServidor();
 }
 
