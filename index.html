@@ -196,7 +196,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
     </div>
     <div class="field" style="margin-bottom:10px;">
       <label>Quilometragem no momento *</label>
-      <input id="mKm" type="number" min="0">
+      <input id="mKm" type="text" inputmode="numeric" placeholder="Ex: 125.000">
       <small class="errmsg" id="errKm"></small>
     </div>
     <div class="field" style="margin-bottom:10px;">
@@ -205,8 +205,8 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
       <small class="errmsg" id="errData"></small>
     </div>
     <div class="field" style="margin-bottom:10px;">
-      <label>Valor gasto (R$) *</label>
-      <input id="mValor" type="number" min="0" step="0.01">
+      <label>Valor gasto (R$) — opcional</label>
+      <input id="mValor" type="text" inputmode="decimal" placeholder="Ex: 1.250,00 (deixe em branco se não houve custo)">
       <small class="errmsg" id="errValor"></small>
     </div>
     <div class="modal-actions">
@@ -221,7 +221,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
     <h3>Atualizar quilometragem atual</h3>
     <div class="field">
       <label>Quilometragem atual (km) *</label>
-      <input id="kmAtualInput" type="number" min="0">
+      <input id="kmAtualInput" type="text" inputmode="numeric" placeholder="Ex: 440.000">
       <small class="errmsg" id="errKmAtual"></small>
     </div>
     <div class="modal-actions">
@@ -357,6 +357,19 @@ function fmtData(iso){ if(!iso) return '-'; const [a,m,d]=iso.split('-'); return
 function hojeISO(){ return new Date().toISOString().split('T')[0]; }
 function fmtMoeda(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
 function fmtKm(v){ return (v||0).toLocaleString('pt-BR')+' km'; }
+
+/*
+  Converte número digitado no formato brasileiro para número real.
+  Ex: "440.000" vira 440000 | "1.250,00" vira 1250 | "1250" vira 1250
+*/
+function parseNumeroBR(str){
+  if(str===null||str===undefined) return NaN;
+  let s=String(str).trim();
+  if(s==='') return NaN;
+  s=s.replace(/\s/g,'').replace(/\./g,'').replace(',','.');
+  return Number(s);
+}
+
 function toast(msg,isErr){
   const t=document.getElementById('toast');
   t.textContent=msg;
@@ -532,8 +545,7 @@ function verificarAlerta(placa,tipo){
 
 /*
   Sincroniza alertas com o servidor em uma única chamada.
-  Nunca lança erro para fora: se falhar, apenas registra no console,
-  para não travar modais nem o fluxo principal.
+  Se falhar, mostra aviso na tela (toast vermelho) para facilitar o diagnóstico.
 */
 async function sincronizarAlertas(){
   try{
@@ -563,6 +575,7 @@ async function sincronizarAlertas(){
     await carregarDoServidor();
   }catch(e){
     console.error('Falha ao sincronizar alertas:', e);
+    toast('Alertas não sincronizados: '+e.message, true);
   }
 }
 
@@ -575,25 +588,22 @@ function renderDetalhe(){
   const total=ms.reduce((s,m)=>s+m.valor,0);
   const outros=ms.filter(m=>m.tipo==='outro');
 
+  /*
+    CORREÇÃO (ponto 1): mostra apenas o limite em km.
+    A data só aparece se o critério for "somente tempo" (quando não existe limite em km).
+  */
   function proximoLimiteTexto(tipo){
     const info=calcularLimite(placa,tipo);
     if(!info || !info.temUltima) return 'Sem histórico ainda';
-    let partes=[];
     if(info.limiteKm!==null){
       const falta = info.limiteKm - v.kmAtual;
-      let txt = fmtKm(info.limiteKm);
-      if(falta>=0) txt += ' (faltam '+fmtKm(falta)+')';
-      else txt += ' (excedido há '+fmtKm(-falta)+')';
-      partes.push(txt);
+      if(falta>=0) return fmtKm(info.limiteKm)+' (faltam '+fmtKm(falta)+')';
+      return fmtKm(info.limiteKm)+' (excedido há '+fmtKm(-falta)+')';
     }
     if(info.limiteData!==null){
-      const dias = Math.round((new Date(info.limiteData+'T00:00:00') - new Date(hojeISO()+'T00:00:00'))/86400000);
-      let txt = fmtData(info.limiteData);
-      if(dias>=0) txt += ' (faltam '+dias+' dias)';
-      else txt += ' (vencido há '+(-dias)+' dias)';
-      partes.push(txt);
+      return fmtData(info.limiteData);
     }
-    return partes.join(' ou ');
+    return '-';
   }
 
   const cfg=db.limites[placa];
@@ -705,23 +715,19 @@ async function atualizarCfg(placa,tipo,campo,valor){
 }
 
 function abrirModalKm(){
-  document.getElementById('kmAtualInput').value = db.veiculos.find(v=>v.placa===veiculoSel).kmAtual;
+  const v=db.veiculos.find(v=>v.placa===veiculoSel);
+  document.getElementById('kmAtualInput').value = v.kmAtual>0 ? Number(v.kmAtual).toLocaleString('pt-BR') : '';
   document.getElementById('errKmAtual').textContent='';
   openModal('modalKm');
 }
 
-/*
-  CORREÇÃO (ponto 1): a caixa fecha logo após salvar no servidor.
-  A sincronização de alertas acontece depois, em segundo plano,
-  e mesmo se falhar a caixa já estará fechada.
-*/
 async function salvarKmAtual(){
   const input=document.getElementById('kmAtualInput');
   const err=document.getElementById('errKmAtual');
   const btn=document.getElementById('btnSalvarKm');
   err.textContent=''; input.classList.remove('err');
-  const val=Number(input.value);
-  if(input.value===''||isNaN(val)||val<0){ err.textContent='Informe uma quilometragem válida (não negativa).'; input.classList.add('err'); return; }
+  const val=parseNumeroBR(input.value);
+  if(input.value.trim()===''||isNaN(val)||val<0){ err.textContent='Informe uma quilometragem válida (não negativa).'; input.classList.add('err'); return; }
 
   btn.disabled=true;
   try{
@@ -783,9 +789,9 @@ function editarManutencao(id){
   document.getElementById('manutTitle').textContent='Editar manutenção — '+veiculoSel;
   document.getElementById('mTipo').value=m.tipo;
   document.getElementById('mDescricao').value=m.descricao||'';
-  document.getElementById('mKm').value=m.km;
+  document.getElementById('mKm').value=m.km>0?Number(m.km).toLocaleString('pt-BR'):'';
   document.getElementById('mData').value=m.data;
-  document.getElementById('mValor').value=m.valor;
+  document.getElementById('mValor').value=m.valor>0?Number(m.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
   toggleOutro();
   mostrarUltimaInfo();
   ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
@@ -793,8 +799,8 @@ function editarManutencao(id){
 }
 
 /*
-  CORREÇÃO (pontos 1 e 2): salva, fecha a caixa imediatamente,
-  atualiza a tela com os dados locais e sincroniza alertas em segundo plano.
+  CORREÇÃO (pontos 2 e 3): km e valor aceitam pontuação brasileira
+  (440.000 = 440000) e o valor pode ficar em branco (sem custo).
 */
 async function salvarManutencao(){
   const tipo=document.getElementById('mTipo').value;
@@ -807,11 +813,17 @@ async function salvarManutencao(){
   let valido=true;
   ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
 
+  const kmVal=parseNumeroBR(km);
+  let valorVal=0;
+
   if(!tipo){ document.getElementById('errTipo').textContent='Selecione o tipo de manutenção.'; valido=false; }
   if(tipo==='outro' && !descricao){ document.getElementById('errDescricao').textContent='Descreva a manutenção realizada.'; valido=false; }
-  if(km===''||isNaN(Number(km))||Number(km)<0){ document.getElementById('errKm').textContent='Informe uma quilometragem válida (não negativa).'; valido=false; }
+  if(km.trim()===''||isNaN(kmVal)||kmVal<0){ document.getElementById('errKm').textContent='Informe uma quilometragem válida (não negativa).'; valido=false; }
   if(!data){ document.getElementById('errData').textContent='Informe a data da manutenção.'; valido=false; }
-  if(valor===''||isNaN(Number(valor))||Number(valor)<0){ document.getElementById('errValor').textContent='Informe um valor válido (não negativo).'; valido=false; }
+  if(valor.trim()!==''){
+    valorVal=parseNumeroBR(valor);
+    if(isNaN(valorVal)||valorVal<0){ document.getElementById('errValor').textContent='Valor inválido. Informe um valor válido ou deixe em branco.'; valido=false; }
+  }
 
   if(!valido) return;
 
@@ -822,9 +834,9 @@ async function salvarManutencao(){
       placa: veiculoSel,
       tipo,
       descricao: tipo==='outro'?descricao:'',
-      km:Number(km),
+      km:kmVal,
       data,
-      valor:Number(valor)
+      valor:valorVal
     };
 
     if(editandoId){
@@ -837,9 +849,9 @@ async function salvarManutencao(){
     }
 
     const v=db.veiculos.find(x=>x.placa===veiculoSel);
-    if(v && Number(km) > v.kmAtual){
-      await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: Number(km) });
-      v.kmAtual=Number(km);
+    if(v && kmVal > v.kmAtual){
+      await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: kmVal });
+      v.kmAtual=kmVal;
     }
 
     closeModal('modalManut');
@@ -970,10 +982,6 @@ async function reativarResolvido(id){
   }
 }
 
-/*
-  CORREÇÃO (ponto 5): alertas agora também são gerados quando o veículo
-  NÃO tem nenhum registro daquele tipo de manutenção (sem histórico).
-*/
 function montarCardAlerta(a, contexto){
   const info=calcularLimite(a.placa,a.tipo);
   const v=db.veiculos.find(x=>x.placa===a.placa);
