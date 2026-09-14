@@ -70,9 +70,6 @@ th{color:var(--dim);font-size:11px;text-transform:uppercase;}
 </head>
 <body>
 
-<!-- ======================================================
-     CONFIGURAÇÃO OBRIGATÓRIA: cole aqui a URL do seu Apps Script
-     ====================================================== -->
 <script>
 const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3dF-t59QLeh7aJoawxgndTfDDsuP5bs_F9sjJ9P_4lyVVj/exec";
 </script>
@@ -185,8 +182,9 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
       <select id="mTipo" onchange="toggleOutro(); mostrarUltimaInfo();">
         <option value="">Selecione...</option>
         <option value="oleo">Troca de óleo</option>
-        <option value="pastilha">Troca de pastilha de freio</option>
-        <option value="embreagem">Troca de embreagem</option>
+        <option value="alinhamento">Alinhamento</option>
+        <option value="oleo_caixa">Troca de óleo da caixa</option>
+        <option value="oleo_diferencial">Troca de óleo do diferencial</option>
         <option value="outro">Outro</option>
       </select>
       <small class="errmsg" id="errTipo"></small>
@@ -237,13 +235,31 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
 <div class="loading-overlay" id="loadingOverlay">Carregando dados da planilha...</div>
 
 <script>
-/* ================= ESTADO (agora em memória, sincronizado com a planilha) ================= */
+/* ================= ESTADO ================= */
 let db = { veiculos:[], manutencoes:[], limites:{}, alertas:[] };
 let carregando = false;
 
-const TIPOS = { oleo:'Troca de óleo', pastilha:'Troca de pastilha de freio', embreagem:'Troca de embreagem' };
+const TIPOS = {
+  oleo:'Troca de óleo',
+  alinhamento:'Alinhamento',
+  oleo_caixa:'Troca de óleo da caixa',
+  oleo_diferencial:'Troca de óleo do diferencial'
+};
+const TIPOS_RASTREADOS = ['oleo','alinhamento','oleo_caixa','oleo_diferencial'];
+const LIMITES_PADRAO = {
+  oleo:{modo:'km_e_meses', km:15000, meses:12},
+  alinhamento:{modo:'km_e_meses', km:20000, meses:6},
+  oleo_caixa:{modo:'km_e_meses', km:100000, meses:24},
+  oleo_diferencial:{modo:'km_e_meses', km:100000, meses:24}
+};
+const LABEL_ULTIMA = {
+  oleo:'Última troca de óleo',
+  alinhamento:'Último alinhamento',
+  oleo_caixa:'Último óleo da caixa',
+  oleo_diferencial:'Último óleo do diferencial'
+};
 
-/* ================= COMUNICAÇÃO COM A PLANILHA (Google Apps Script) ================= */
+/* ================= COMUNICAÇÃO COM A PLANILHA ================= */
 function setLoading(v){
   carregando = v;
   document.getElementById('loadingOverlay').classList.toggle('show', v);
@@ -266,10 +282,6 @@ async function apiPost(action, data){
   return json;
 }
 
-/*
-  Converte os dados brutos vindos da planilha (arrays de objetos "achatados")
-  para a estrutura interna que o sistema usa (db.veiculos, db.manutencoes, db.limites, db.alertas)
-*/
 function normalizarDadosDaPlanilha(raw){
   const veiculos = (raw.veiculos||[]).map(v=>({
     placa: String(v.placa).trim().toUpperCase(),
@@ -279,8 +291,8 @@ function normalizarDadosDaPlanilha(raw){
   const manutencoes = (raw.manutencoes||[]).map(m=>({
     id: String(m.id),
     placa: String(m.placa).trim().toUpperCase(),
-    tipo: m.tipo,
-    descricao: m.descricao || '',
+    tipo: String(m.tipo||'').trim(),
+    descricao: m.descricao || m['descrição'] || '',
     km: Number(m.km)||0,
     data: formatarDataPlanilhaParaISO(m.data),
     valor: Number(m.valor)||0
@@ -290,13 +302,13 @@ function normalizarDadosDaPlanilha(raw){
   (raw.limites||[]).forEach(l=>{
     const placa = String(l.placa).trim().toUpperCase();
     if(!limites[placa]) limites[placa] = {};
-    limites[placa][l.tipo] = { modo: l.modo, km: Number(l.km)||0, meses: Number(l.meses)||0 };
+    limites[placa][String(l.tipo||'').trim()] = { modo: l.modo, km: Number(l.km)||0, meses: Number(l.meses)||0 };
   });
 
   const alertas = (raw.alertas||[]).map(a=>({
     id: String(a.id),
     placa: String(a.placa).trim().toUpperCase(),
-    tipo: a.tipo,
+    tipo: String(a.tipo||'').trim(),
     status: a.status || 'ativo',
     dataAnalise: a.dataAnalise ? formatarDataPlanilhaParaISO(a.dataAnalise) : null,
     dataResolucao: a.dataResolucao ? formatarDataPlanilhaParaISO(a.dataResolucao) : null
@@ -305,7 +317,6 @@ function normalizarDadosDaPlanilha(raw){
   return { veiculos, manutencoes, limites, alertas };
 }
 
-/* O Google Sheets pode devolver datas como string "2026-09-10" ou como objeto Date serializado. Trata os dois casos. */
 function formatarDataPlanilhaParaISO(valor){
   if(!valor) return '';
   if(typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}/.test(valor)) return valor.slice(0,10);
@@ -331,13 +342,10 @@ async function carregarDoServidor(){
 }
 
 function garantirLimites(placa){
-  if(!db.limites[placa]){
-    db.limites[placa] = {
-      oleo:{modo:'km_e_meses', km:15000, meses:12},
-      pastilha:{modo:'km_e_meses', km:30000, meses:12},
-      embreagem:{modo:'km_e_meses', km:100000, meses:24}
-    };
-  }
+  if(!db.limites[placa]) db.limites[placa] = {};
+  TIPOS_RASTREADOS.forEach(t=>{
+    if(!db.limites[placa][t]) db.limites[placa][t] = Object.assign({}, LIMITES_PADRAO[t]);
+  });
 }
 
 function gerarId(){
@@ -375,7 +383,6 @@ document.querySelectorAll('.navbtn').forEach(btn=>{
     btn.classList.add('active');
     document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
 
-    // Não busca mais dados do servidor a cada clique — usa o cache já carregado em memória (db)
     if(btn.dataset.tab==='manutencao') renderManutTab();
     if(btn.dataset.tab==='dashboard') renderDashboard();
     if(btn.dataset.tab==='alertas') renderAlertas();
@@ -388,6 +395,7 @@ async function atualizarManualmente(){
   const btn=document.getElementById('btnAtualizar');
   btn.disabled=true;
   await carregarDoServidor();
+  await sincronizarAlertas();
   const tabAtiva=document.querySelector('.navbtn.active').dataset.tab;
   if(tabAtiva==='manutencao'){ if(veiculoSel) renderDetalhe(); else renderManutTab(); }
   if(tabAtiva==='dashboard') renderDashboard();
@@ -416,10 +424,12 @@ async function cadastrarVeiculo(){
   btn.disabled=true;
   try{
     await apiPost('addVeiculo', { placa });
-    await carregarDoServidor();
+    db.veiculos.push({ placa, kmAtual: 0 });
+    garantirLimites(placa);
     input.value='';
     toast('Veículo '+placa+' cadastrado com sucesso.');
     renderCadastro();
+    await sincronizarAlertas();
   }catch(e){
     toast('Erro ao cadastrar: '+e.message, true);
   }finally{
@@ -505,7 +515,8 @@ function calcularLimite(placa,tipo){
 
 function verificarAlerta(placa,tipo){
   const info=calcularLimite(placa,tipo);
-  if(!info || !info.temUltima) return null;
+  if(!info) return null;
+  if(!info.temUltima) return { deveAlertar:true, semHistorico:true, info };
   const veiculo=db.veiculos.find(v=>v.placa===placa);
   const kmAtual=veiculo?veiculo.kmAtual:0;
   const hoje=hojeISO();
@@ -520,34 +531,39 @@ function verificarAlerta(placa,tipo){
 }
 
 /*
-  Sincroniza alertas com o servidor: cria novo alerta na planilha se necessário,
-  ou remove (via API) alertas abertos que não fazem mais sentido (novo ciclo iniciado).
+  Sincroniza alertas com o servidor em uma única chamada.
+  Nunca lança erro para fora: se falhar, apenas registra no console,
+  para não travar modais nem o fluxo principal.
 */
 async function sincronizarAlertas(){
-  const paraAdicionar = [];
-  const idsParaRemover = [];
+  try{
+    const paraAdicionar = [];
+    const idsParaRemover = [];
 
-  for(const v of db.veiculos){
-    for(const tipo of ['oleo','pastilha','embreagem']){
-      const check=verificarAlerta(v.placa,tipo);
-      const abertoExistente = db.alertas.find(a=>a.placa===v.placa && a.tipo===tipo && a.status!=='resolvido');
+    for(const v of db.veiculos){
+      for(const tipo of TIPOS_RASTREADOS){
+        const check=verificarAlerta(v.placa,tipo);
+        const abertoExistente = db.alertas.find(a=>a.placa===v.placa && a.tipo===tipo && a.status!=='resolvido');
 
-      if(check && check.deveAlertar){
-        if(!abertoExistente){
-          paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
-        }
-      } else {
-        if(abertoExistente){
-          idsParaRemover.push(abertoExistente.id);
+        if(check && check.deveAlertar){
+          if(!abertoExistente){
+            paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
+          }
+        } else {
+          if(abertoExistente){
+            idsParaRemover.push(abertoExistente.id);
+          }
         }
       }
     }
+
+    if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
+
+    await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
+    await carregarDoServidor();
+  }catch(e){
+    console.error('Falha ao sincronizar alertas:', e);
   }
-
-  if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
-
-  await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
-  await carregarDoServidor();
 }
 
 function renderDetalhe(){
@@ -557,22 +573,35 @@ function renderDetalhe(){
   garantirLimites(placa);
   const ms=db.manutencoes.filter(m=>m.placa===placa).sort((a,b)=>new Date(b.data)-new Date(a.data));
   const total=ms.reduce((s,m)=>s+m.valor,0);
-
-  const ultOleo=ultimaManut(placa,'oleo');
-  const ultPastilha=ultimaManut(placa,'pastilha');
-  const ultEmbreagem=ultimaManut(placa,'embreagem');
   const outros=ms.filter(m=>m.tipo==='outro');
 
   function proximoLimiteTexto(tipo){
     const info=calcularLimite(placa,tipo);
     if(!info || !info.temUltima) return 'Sem histórico ainda';
     let partes=[];
-    if(info.limiteKm!==null) partes.push(fmtKm(info.limiteKm));
-    if(info.limiteData!==null) partes.push(fmtData(info.limiteData));
+    if(info.limiteKm!==null){
+      const falta = info.limiteKm - v.kmAtual;
+      let txt = fmtKm(info.limiteKm);
+      if(falta>=0) txt += ' (faltam '+fmtKm(falta)+')';
+      else txt += ' (excedido há '+fmtKm(-falta)+')';
+      partes.push(txt);
+    }
+    if(info.limiteData!==null){
+      const dias = Math.round((new Date(info.limiteData+'T00:00:00') - new Date(hojeISO()+'T00:00:00'))/86400000);
+      let txt = fmtData(info.limiteData);
+      if(dias>=0) txt += ' (faltam '+dias+' dias)';
+      else txt += ' (vencido há '+(-dias)+' dias)';
+      partes.push(txt);
+    }
     return partes.join(' ou ');
   }
 
   const cfg=db.limites[placa];
+
+  const cardsTipos = TIPOS_RASTREADOS.map(t=>{
+    const ult=ultimaManut(placa,t);
+    return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult? fmtData(ult.data)+' · '+fmtKm(ult.km) : 'Sem registro'}</div></div>`;
+  }).join('');
 
   let html = `
     <div class="back" onclick="renderManutTab()">← Voltar para lista de veículos</div>
@@ -592,16 +621,14 @@ function renderDetalhe(){
     <div class="grid-cards">
       <div class="kpi"><div class="label">Total gasto</div><div class="value">${fmtMoeda(total)}</div></div>
       <div class="kpi"><div class="label">Nº manutenções</div><div class="value">${ms.length}</div></div>
-      <div class="kpi"><div class="label">Última troca de óleo</div><div class="value" style="font-size:15px;">${ultOleo? fmtData(ultOleo.data)+' · '+fmtKm(ultOleo.km) : 'Sem registro'}</div></div>
-      <div class="kpi"><div class="label">Última pastilha de freio</div><div class="value" style="font-size:15px;">${ultPastilha? fmtData(ultPastilha.data)+' · '+fmtKm(ultPastilha.km) : 'Sem registro'}</div></div>
-      <div class="kpi"><div class="label">Última embreagem</div><div class="value" style="font-size:15px;">${ultEmbreagem? fmtData(ultEmbreagem.data)+' · '+fmtKm(ultEmbreagem.km) : 'Sem registro'}</div></div>
+      ${cardsTipos}
       <div class="kpi"><div class="label">Outras manutenções</div><div class="value">${outros.length}</div></div>
     </div>
 
     <div class="card">
       <h2>Configuração de alertas por tipo de manutenção</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-        ${['oleo','pastilha','embreagem'].map(tipo=>`
+        ${TIPOS_RASTREADOS.map(tipo=>`
           <div class="limitbox">
             <div style="font-weight:bold;margin-bottom:8px;">${TIPOS[tipo]}</div>
             <div class="row">
@@ -640,7 +667,7 @@ function renderDetalhe(){
             <tr>
               <td>${fmtData(m.data)}</td>
               <td>${fmtKm(m.km)}</td>
-              <td>${TIPOS[m.tipo] || 'Outro'}</td>
+              <td>${m.tipo==='outro' ? 'Outro' : (TIPOS[m.tipo] || m.tipo)}</td>
               <td>${m.tipo==='outro' ? (m.descricao||'-') : '-'}</td>
               <td>${fmtMoeda(m.valor)}</td>
               <td>
@@ -669,6 +696,7 @@ async function atualizarCfg(placa,tipo,campo,valor){
       km: db.limites[placa][tipo].km,
       meses: db.limites[placa][tipo].meses
     });
+    renderDetalhe();
     await sincronizarAlertas();
     renderDetalhe();
   }catch(e){
@@ -681,6 +709,12 @@ function abrirModalKm(){
   document.getElementById('errKmAtual').textContent='';
   openModal('modalKm');
 }
+
+/*
+  CORREÇÃO (ponto 1): a caixa fecha logo após salvar no servidor.
+  A sincronização de alertas acontece depois, em segundo plano,
+  e mesmo se falhar a caixa já estará fechada.
+*/
 async function salvarKmAtual(){
   const input=document.getElementById('kmAtualInput');
   const err=document.getElementById('errKmAtual');
@@ -692,10 +726,12 @@ async function salvarKmAtual(){
   btn.disabled=true;
   try{
     await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: val });
-    await carregarDoServidor();
-    await sincronizarAlertas();
+    const v=db.veiculos.find(x=>x.placa===veiculoSel);
+    if(v) v.kmAtual=val;
     closeModal('modalKm');
     toast('Quilometragem atualizada.');
+    renderDetalhe();
+    await sincronizarAlertas();
     renderDetalhe();
   }catch(e){
     toast('Erro ao atualizar quilometragem: '+e.message, true);
@@ -756,6 +792,10 @@ function editarManutencao(id){
   openModal('modalManut');
 }
 
+/*
+  CORREÇÃO (pontos 1 e 2): salva, fecha a caixa imediatamente,
+  atualiza a tela com os dados locais e sincroniza alertas em segundo plano.
+*/
 async function salvarManutencao(){
   const tipo=document.getElementById('mTipo').value;
   const descricao=document.getElementById('mDescricao').value.trim();
@@ -777,29 +817,35 @@ async function salvarManutencao(){
 
   btn.disabled=true;
   try{
+    const registro = {
+      id: editandoId || gerarId(),
+      placa: veiculoSel,
+      tipo,
+      descricao: tipo==='outro'?descricao:'',
+      km:Number(km),
+      data,
+      valor:Number(valor)
+    };
+
     if(editandoId){
-      await apiPost('updateManutencao', {
-        id: editandoId, placa: veiculoSel, tipo,
-        descricao: tipo==='outro'?descricao:'',
-        km:Number(km), data, valor:Number(valor)
-      });
+      await apiPost('updateManutencao', registro);
+      const i=db.manutencoes.findIndex(x=>x.id===editandoId);
+      if(i>=0) db.manutencoes[i]=registro;
     } else {
-      await apiPost('addManutencao', {
-        id: gerarId(), placa: veiculoSel, tipo,
-        descricao: tipo==='outro'?descricao:'',
-        km:Number(km), data, valor:Number(valor)
-      });
+      await apiPost('addManutencao', registro);
+      db.manutencoes.push(registro);
     }
 
     const v=db.veiculos.find(x=>x.placa===veiculoSel);
-    if(Number(km) > v.kmAtual){
+    if(v && Number(km) > v.kmAtual){
       await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: Number(km) });
+      v.kmAtual=Number(km);
     }
 
-    await carregarDoServidor();
-    await sincronizarAlertas();
     closeModal('modalManut');
     toast('Manutenção salva com sucesso.');
+    renderDetalhe();
+    await sincronizarAlertas();
     renderDetalhe();
   }catch(e){
     toast('Erro ao salvar manutenção: '+e.message, true);
@@ -814,10 +860,11 @@ function excluirManutencao(id){
   document.getElementById('confirmBtn').onclick=async ()=>{
     try{
       await apiPost('deleteManutencao', { id });
-      await carregarDoServidor();
-      await sincronizarAlertas();
+      db.manutencoes = db.manutencoes.filter(m=>m.id!==id);
       closeModal('modalConfirm');
       toast('Manutenção excluída.');
+      renderDetalhe();
+      await sincronizarAlertas();
       renderDetalhe();
     }catch(e){
       toast('Erro ao excluir: '+e.message, true);
@@ -923,20 +970,29 @@ async function reativarResolvido(id){
   }
 }
 
+/*
+  CORREÇÃO (ponto 5): alertas agora também são gerados quando o veículo
+  NÃO tem nenhum registro daquele tipo de manutenção (sem histórico).
+*/
 function montarCardAlerta(a, contexto){
   const info=calcularLimite(a.placa,a.tipo);
-  if(!info || !info.temUltima) return '';
   const v=db.veiculos.find(x=>x.placa===a.placa);
   const kmAtual=v?v.kmAtual:0;
   const hoje=hojeISO();
-  const excedKm = info.limiteKm!==null && kmAtual>=info.limiteKm;
-  const excedTempo = info.limiteData!==null && hoje>=info.limiteData;
+  const nomeTipo = TIPOS[a.tipo] || a.tipo;
+  const semHistorico = !info || !info.temUltima;
 
   let motivo='';
-  if(excedKm && excedTempo) motivo='ALERTA: quilometragem e prazo excedidos. Veículo deve ser inspecionado.';
-  else if(excedKm) motivo='ALERTA: quilometragem excedida. Veículo deve ser inspecionado.';
-  else if(excedTempo) motivo='ALERTA: prazo excedido. Veículo deve ser inspecionado.';
-  else motivo='Situação regularizada.';
+  if(semHistorico){
+    motivo='ALERTA: veículo sem registro de '+nomeTipo.toLowerCase()+'. Veículo deve ser inspecionado.';
+  } else {
+    const excedKm = info.limiteKm!==null && kmAtual>=info.limiteKm;
+    const excedTempo = info.limiteData!==null && hoje>=info.limiteData;
+    if(excedKm && excedTempo) motivo='ALERTA: quilometragem e prazo excedidos. Veículo deve ser inspecionado.';
+    else if(excedKm) motivo='ALERTA: quilometragem excedida. Veículo deve ser inspecionado.';
+    else if(excedTempo) motivo='ALERTA: prazo excedido. Veículo deve ser inspecionado.';
+    else motivo='Situação regularizada.';
+  }
 
   let badgeStatus='';
   let classeExtra='';
@@ -955,19 +1011,27 @@ function montarCardAlerta(a, contexto){
     acoes = `<button class="btn secondary small" onclick="reativarResolvido('${a.id}')">Reabrir alerta</button>`;
   }
 
-  return `
-    <div class="alertcard ${classeExtra}">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center;">
-        <div style="font-size:16px;font-weight:bold;">${a.placa} — ${TIPOS[a.tipo]}</div>
-        ${badgeStatus}
-      </div>
+  const detalhes = semHistorico ? `
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
+        <div>Última manutenção: <b style="color:var(--text)">Sem registro</b></div>
+        <div>Km atual do veículo: <b style="color:var(--text)">${fmtKm(kmAtual)}</b></div>
+      </div>`
+    : `
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
         <div>Última manutenção: <b style="color:var(--text)">${fmtData(info.ultima.data)}</b></div>
         <div>Km da última manutenção: <b style="color:var(--text)">${fmtKm(info.ultima.km)}</b></div>
         <div>Km atual do veículo: <b style="color:var(--text)">${fmtKm(kmAtual)}</b></div>
         ${info.limiteKm!==null ? `<div>Limite de km: <b style="color:var(--text)">${fmtKm(info.limiteKm)}</b></div>` : ''}
         ${info.limiteData!==null ? `<div>Limite de prazo: <b style="color:var(--text)">${fmtData(info.limiteData)}</b></div>` : ''}
+      </div>`;
+
+  return `
+    <div class="alertcard ${classeExtra}">
+      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center;">
+        <div style="font-size:16px;font-weight:bold;">${a.placa} — ${nomeTipo}</div>
+        ${badgeStatus}
       </div>
+      ${detalhes}
       <div class="alertmsg">${motivo}</div>
       <div style="display:flex;gap:8px;">${acoes}</div>
     </div>
