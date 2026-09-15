@@ -648,36 +648,28 @@ async function sincronizarAlertas(){
       }
     }
 
-    if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
+   // Verifica se há algo a fazer antes de disparar requisições
+if (paraAdicionar.length === 0 && idsParaRemover.length === 0) return;
 
-    try{
-      await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
-    }catch(e){
-      for(const id of idsParaRemover){ await apiPost('deleteAlerta', { id }); }
-      for(const a of paraAdicionar){ await apiPost('addAlerta', a); }
+try {
+  // Tenta sincronizar em lote
+  try {
+    await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
+  } catch (e) {
+    // Fallback item por item caso o lote falhe
+    for (const id of idsParaRemover) {
+      await apiPost('deleteAlerta', { id });
     }
-    await carregarDoServidor(true);
-    renderTelaAtual();
-  }catch(e){
-    console.error('Falha ao sincronizar alertas:', e);
-    toast('Alertas não sincronizados: '+e.message, true);
-  }
-}
-
-    if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
-
-    try{
-      await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
-    }catch(e){
-      for(const id of idsParaRemover){ await apiPost('deleteAlerta', { id }); }
-      for(const a of paraAdicionar){ await apiPost('addAlerta', a); }
+    for (const a of paraAdicionar) {
+      await apiPost('addAlerta', a);
     }
-    await carregarDoServidor(true);
-    renderTelaAtual();
-  }catch(e){
-    console.error('Falha ao sincronizar alertas:', e);
-    toast('Alertas não sincronizados: '+e.message, true);
   }
+
+  await carregarDoServidor(true);
+  renderTelaAtual();
+} catch (e) {
+  console.error('Falha ao sincronizar alertas:', e);
+  toast('Alertas não sincronizados: ' + e.message, true);
 }
 
 function renderDetalhe(){
