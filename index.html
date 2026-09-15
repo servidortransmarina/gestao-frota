@@ -312,5 +312,178 @@ const LABEL_ULTIMA = {
 };
 
 /* ================= CACHE LOCAL ================= */
-const CACHE
 
+const CACHE_KEY = 'frotaCacheV2';
+
+
+function salvarCache(){
+  try{
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify(db)
+    );
+  }catch(e){
+    console.warn('Não foi possível salvar o cache local:', e);
+  }
+}
+
+
+function carregarCache(){
+
+  try{
+
+    const c = localStorage.getItem(CACHE_KEY);
+
+    if(!c){
+      return false;
+    }
+
+    const dados = JSON.parse(c);
+
+    /*
+      Validação mínima para evitar que um cache
+      antigo ou corrompido quebre o sistema.
+    */
+
+    if(
+      !dados ||
+      !Array.isArray(dados.veiculos) ||
+      !Array.isArray(dados.manutencoes) ||
+      !Array.isArray(dados.alertas)
+    ){
+      localStorage.removeItem(CACHE_KEY);
+      return false;
+    }
+
+
+    db = {
+      veiculos: Array.isArray(dados.veiculos)
+        ? dados.veiculos
+        : [],
+
+      manutencoes: Array.isArray(dados.manutencoes)
+        ? dados.manutencoes
+        : [],
+
+      limites:
+        dados.limites &&
+        typeof dados.limites === 'object' &&
+        !Array.isArray(dados.limites)
+          ? dados.limites
+          : {},
+
+      alertas: Array.isArray(dados.alertas)
+        ? dados.alertas
+        : []
+    };
+
+
+    /*
+      Normaliza os dados carregados do cache.
+    */
+
+    db.veiculos.forEach(v => {
+
+      v.placa = String(
+        v.placa || ''
+      )
+      .trim()
+      .toUpperCase();
+
+      v.kmAtual =
+        Number(v.kmAtual) || 0;
+
+    });
+
+
+    db.manutencoes.forEach(m => {
+
+      m.id = String(m.id || '');
+
+      m.placa = String(
+        m.placa || ''
+      )
+      .trim()
+      .toUpperCase();
+
+      m.tipo = String(
+        m.tipo || ''
+      )
+      .trim();
+
+      m.km =
+        Number(m.km) || 0;
+
+      m.valor =
+        Number(m.valor) || 0;
+
+    });
+
+
+    db.alertas.forEach(a => {
+
+      a.id = String(a.id || '');
+
+      a.placa = String(
+        a.placa || ''
+      )
+      .trim()
+      .toUpperCase();
+
+      a.tipo = String(
+        a.tipo || ''
+      )
+      .trim();
+
+      a.status =
+        String(
+          a.status || 'ativo'
+        )
+        .trim()
+        .toLowerCase();
+
+      /*
+        Compatibilidade com alertas antigos:
+        se não existir origem, trata como automático.
+      */
+
+      if(!a.origem){
+        a.origem = 'automatico';
+      }
+
+      if(
+        a.origem === 'agendado' &&
+        !a.dataAgendada
+      ){
+        a.dataAgendada = null;
+      }
+
+    });
+
+
+    /*
+      Garante que todos os veículos tenham
+      os quatro limites padrão.
+    */
+
+    db.veiculos.forEach(v => {
+      garantirLimites(v.placa);
+    });
+
+
+    return true;
+
+  }catch(e){
+
+    console.warn(
+      'Erro ao carregar cache local:',
+      e
+    );
+
+    try{
+      localStorage.removeItem(CACHE_KEY);
+    }catch(err){}
+
+    return false;
+  }
+}
