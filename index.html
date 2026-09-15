@@ -57,7 +57,7 @@ th{color:var(--dim);font-size:11px;text-transform:uppercase;}
 .alertcard.analise{border-left-color:var(--warning);}
 .alertcard.resolvido{border-left-color:var(--success);}
 .alertmsg{font-weight:bold;color:#f87171;margin:8px 0;}
-.toast{position:fixed;bottom:18px;right:18px;background:var(--card);border-left:4px solid var(--success);padding:12px 18px;border-radius:6px;display:none;z-index:2000;}
+.toast{position:fixed;bottom:18px;right:18px;background:var(--card);border-left:4px solid var(--success);padding:12px 18px;border-radius:6px;display:none;z-index:2000;max-width:400px;}
 .toast.show{display:block;}
 .toast.err{border-left-color:var(--danger);}
 .bar-row{display:flex;align-items:center;gap:10px;margin-bottom:8px;}
@@ -259,27 +259,82 @@ const LABEL_ULTIMA = {
   oleo_diferencial:'Último óleo do diferencial'
 };
 
+/* ================= CACHE LOCAL (abertura instantânea) ================= */
+const CACHE_KEY = 'frotaCacheV1';
+
+function salvarCache(){
+  try{ localStorage.setItem(CACHE_KEY, JSON.stringify(db)); }catch(e){}
+}
+
+function carregarCache(){
+  try{
+    const c = localStorage.getItem(CACHE_KEY);
+    if(!c) return false;
+    const dados = JSON.parse(c);
+    if(!dados || !Array.isArray(dados.veiculos)) return false;
+    db = dados;
+    db.veiculos.forEach(v=>garantirLimites(v.placa));
+    return true;
+  }catch(e){ return false; }
+}
+
+/* ================= FILA DE REQUISIÇÕES =================
+   CORREÇÃO (ponto 1): envia as requisições uma de cada vez, em fila.
+   Isso impede o erro que acontecia ao salvar duas vezes seguidas rápido
+   (ex: 440.000 e logo depois 441.000), porque o Google não aceita bem
+   duas escritas simultâneas na mesma planilha. */
+let _fila = Promise.resolve();
+function enfileirar(fn){
+  const p = _fila.then(fn);
+  _fila = p.catch(()=>{});
+  return p;
+}
+
 /* ================= COMUNICAÇÃO COM A PLANILHA ================= */
 function setLoading(v){
   carregando = v;
   document.getElementById('loadingOverlay').classList.toggle('show', v);
 }
 
+/*
+   CORREÇÃO (ponto 4): tenta até 3 vezes com pausa entre elas.
+   Resolve o erro de "falha ao carregar" que aparecia na primeira
+   abertura em alguns computadores (o Google às vezes demora para
+   "acordar" e a primeira tentativa falha).
+*/
+async function fetchGetComRetry(url, tentativas){
+  let ultimoErro;
+  for(let i=0; i<(tentativas||3); i++){
+    try{
+      const res = await fetch(url);
+      if(!res.ok) throw new Error('HTTP '+res.status);
+      return res;
+    }catch(e){
+      ultimoErro = e;
+      await new Promise(r=>setTimeout(r, 1000*(i+1)));
+    }
+  }
+  throw ultimoErro;
+}
+
 async function apiGet(){
-  const res = await fetch(API_URL + '?action=getAll');
-  if(!res.ok) throw new Error('Falha ao conectar com a planilha.');
-  return res.json();
+  return enfileirar(async ()=>{
+    const res = await fetchGetComRetry(API_URL + '?action=getAll', 3);
+    return res.json();
+  });
 }
 
 async function apiPost(action, data){
-  const res = await fetch(API_URL, {
-    method:'POST',
-    body: JSON.stringify({ action, data })
+  return enfileirar(async ()=>{
+    const res = await fetch(API_URL, {
+      method:'POST',
+      body: JSON.stringify({ action, data })
+    });
+    if(!res.ok) throw new Error('Falha ao enviar dados para a planilha.');
+    const json = await res.json();
+    if(json.error) throw new Error(json.error);
+    return json;
   });
-  if(!res.ok) throw new Error('Falha ao enviar dados para a planilha.');
-  const json = await res.json();
-  if(json.error) throw new Error(json.error);
-  return json;
 }
 
 function normalizarDadosDaPlanilha(raw){
@@ -328,16 +383,23 @@ function formatarDataPlanilhaParaISO(valor){
   return `${ano}-${mes}-${dia}`;
 }
 
-async function carregarDoServidor(){
-  setLoading(true);
+/*
+   CORREÇÃO (ponto 3): modo "silencioso" atualiza os dados em segundo
+   plano, sem mostrar a tela de carregamento. Usado na abertura quando
+   já existe cache local.
+*/
+async function carregarDoServidor(silencioso){
+  if(!silencioso) setLoading(true);
   try{
     const raw = await apiGet();
     db = normalizarDadosDaPlanilha(raw);
     db.veiculos.forEach(v=> garantirLimites(v.placa));
+    salvarCache();
   }catch(e){
-    toast('Erro ao carregar dados da planilha: ' + e.message, true);
+    if(silencioso) console.error('Erro ao atualizar em segundo plano:', e);
+    else toast('Erro ao carregar dados da planilha: ' + e.message, true);
   }finally{
-    setLoading(false);
+    if(!silencioso) setLoading(false);
   }
 }
 
@@ -358,10 +420,7 @@ function hojeISO(){ return new Date().toISOString().split('T')[0]; }
 function fmtMoeda(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
 function fmtKm(v){ return (v||0).toLocaleString('pt-BR')+' km'; }
 
-/*
-  Converte número digitado no formato brasileiro para número real.
-  Ex: "440.000" vira 440000 | "1.250,00" vira 1250 | "1250" vira 1250
-*/
+/* Converte número no formato brasileiro: "440.000" vira 440000 | "1.250,00" vira 1250 */
 function parseNumeroBR(str){
   if(str===null||str===undefined) return NaN;
   let s=String(str).trim();
@@ -374,7 +433,7 @@ function toast(msg,isErr){
   const t=document.getElementById('toast');
   t.textContent=msg;
   t.className='toast show'+(isErr?' err':'');
-  setTimeout(()=>{t.className='toast';},3500);
+  setTimeout(()=>{t.className='toast';}, isErr?6000:3500);
 }
 function addMeses(iso,meses){ const d=new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+meses); return d.toISOString().split('T')[0]; }
 
@@ -389,6 +448,15 @@ function closeModal(id){ document.getElementById(id).classList.remove('show'); }
 function openModal(id){ document.getElementById(id).classList.add('show'); }
 
 /* ================= NAVEGAÇÃO ================= */
+function renderTelaAtual(){
+  const tabAtiva=document.querySelector('.navbtn.active').dataset.tab;
+  if(tabAtiva==='manutencao'){ if(veiculoSel) renderDetalhe(); else renderManutTab(); }
+  if(tabAtiva==='dashboard') renderDashboard();
+  if(tabAtiva==='alertas') renderAlertas();
+  if(tabAtiva==='resolvidos') renderResolvidos();
+  if(tabAtiva==='cadastro') renderCadastro();
+}
+
 document.querySelectorAll('.navbtn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('.navbtn').forEach(b=>b.classList.remove('active'));
@@ -409,12 +477,7 @@ async function atualizarManualmente(){
   btn.disabled=true;
   await carregarDoServidor();
   await sincronizarAlertas();
-  const tabAtiva=document.querySelector('.navbtn.active').dataset.tab;
-  if(tabAtiva==='manutencao'){ if(veiculoSel) renderDetalhe(); else renderManutTab(); }
-  if(tabAtiva==='dashboard') renderDashboard();
-  if(tabAtiva==='alertas') renderAlertas();
-  if(tabAtiva==='resolvidos') renderResolvidos();
-  if(tabAtiva==='cadastro') renderCadastro();
+  renderTelaAtual();
   toast('Dados atualizados.');
   btn.disabled=false;
 }
@@ -439,10 +502,11 @@ async function cadastrarVeiculo(){
     await apiPost('addVeiculo', { placa });
     db.veiculos.push({ placa, kmAtual: 0 });
     garantirLimites(placa);
+    salvarCache();
     input.value='';
     toast('Veículo '+placa+' cadastrado com sucesso.');
     renderCadastro();
-    await sincronizarAlertas();
+    sincronizarAlertas();
   }catch(e){
     toast('Erro ao cadastrar: '+e.message, true);
   }finally{
@@ -544,8 +608,10 @@ function verificarAlerta(placa,tipo){
 }
 
 /*
-  Sincroniza alertas com o servidor em uma única chamada.
-  Se falhar, mostra aviso na tela (toast vermelho) para facilitar o diagnóstico.
+   CORREÇÃO (ponto 2): se a planilha ainda estiver com a versão antiga
+   do Apps Script (sem a ação "syncAlertas"), o sistema usa
+   automaticamente as ações antigas (addAlerta/deleteAlerta) como
+   alternativa. Ou seja: os alertas funcionam nas duas versões.
 */
 async function sincronizarAlertas(){
   try{
@@ -571,8 +637,14 @@ async function sincronizarAlertas(){
 
     if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
 
-    await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
-    await carregarDoServidor();
+    try{
+      await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
+    }catch(e){
+      for(const id of idsParaRemover){ await apiPost('deleteAlerta', { id }); }
+      for(const a of paraAdicionar){ await apiPost('addAlerta', a); }
+    }
+    await carregarDoServidor(true);
+    renderTelaAtual();
   }catch(e){
     console.error('Falha ao sincronizar alertas:', e);
     toast('Alertas não sincronizados: '+e.message, true);
@@ -588,10 +660,7 @@ function renderDetalhe(){
   const total=ms.reduce((s,m)=>s+m.valor,0);
   const outros=ms.filter(m=>m.tipo==='outro');
 
-  /*
-    CORREÇÃO (ponto 1): mostra apenas o limite em km.
-    A data só aparece se o critério for "somente tempo" (quando não existe limite em km).
-  */
+  /* Mostra apenas o limite em km. A data só aparece se o critério for "somente tempo". */
   function proximoLimiteTexto(tipo){
     const info=calcularLimite(placa,tipo);
     if(!info || !info.temUltima) return 'Sem histórico ainda';
@@ -706,9 +775,9 @@ async function atualizarCfg(placa,tipo,campo,valor){
       km: db.limites[placa][tipo].km,
       meses: db.limites[placa][tipo].meses
     });
+    salvarCache();
     renderDetalhe();
-    await sincronizarAlertas();
-    renderDetalhe();
+    sincronizarAlertas();
   }catch(e){
     toast('Erro ao salvar configuração: '+e.message, true);
   }
@@ -721,6 +790,10 @@ function abrirModalKm(){
   openModal('modalKm');
 }
 
+/*
+   CORREÇÃO (ponto 1): o botão é liberado logo após salvar o km.
+   A sincronização de alertas roda em segundo plano, sem travar a tela.
+*/
 async function salvarKmAtual(){
   const input=document.getElementById('kmAtualInput');
   const err=document.getElementById('errKmAtual');
@@ -734,11 +807,11 @@ async function salvarKmAtual(){
     await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: val });
     const v=db.veiculos.find(x=>x.placa===veiculoSel);
     if(v) v.kmAtual=val;
+    salvarCache();
     closeModal('modalKm');
     toast('Quilometragem atualizada.');
     renderDetalhe();
-    await sincronizarAlertas();
-    renderDetalhe();
+    sincronizarAlertas();
   }catch(e){
     toast('Erro ao atualizar quilometragem: '+e.message, true);
   }finally{
@@ -798,10 +871,6 @@ function editarManutencao(id){
   openModal('modalManut');
 }
 
-/*
-  CORREÇÃO (pontos 2 e 3): km e valor aceitam pontuação brasileira
-  (440.000 = 440000) e o valor pode ficar em branco (sem custo).
-*/
 async function salvarManutencao(){
   const tipo=document.getElementById('mTipo').value;
   const descricao=document.getElementById('mDescricao').value.trim();
@@ -854,11 +923,11 @@ async function salvarManutencao(){
       v.kmAtual=kmVal;
     }
 
+    salvarCache();
     closeModal('modalManut');
     toast('Manutenção salva com sucesso.');
     renderDetalhe();
-    await sincronizarAlertas();
-    renderDetalhe();
+    sincronizarAlertas();
   }catch(e){
     toast('Erro ao salvar manutenção: '+e.message, true);
   }finally{
@@ -873,11 +942,11 @@ function excluirManutencao(id){
     try{
       await apiPost('deleteManutencao', { id });
       db.manutencoes = db.manutencoes.filter(m=>m.id!==id);
+      salvarCache();
       closeModal('modalConfirm');
       toast('Manutenção excluída.');
       renderDetalhe();
-      await sincronizarAlertas();
-      renderDetalhe();
+      sincronizarAlertas();
     }catch(e){
       toast('Erro ao excluir: '+e.message, true);
     }
@@ -947,7 +1016,7 @@ function renderDashboard(){
 async function marcarResolvido(id){
   try{
     await apiPost('updateAlerta', { id, status:'resolvido', dataAnalise:null, dataResolucao: hojeISO() });
-    await carregarDoServidor();
+    await carregarDoServidor(true);
     toast('Alerta marcado como resolvido e movido para o histórico.');
     renderAlertas();
   }catch(e){
@@ -957,7 +1026,7 @@ async function marcarResolvido(id){
 async function marcarAnalise(id){
   try{
     await apiPost('updateAlerta', { id, status:'analise', dataAnalise: hojeISO(), dataResolucao:null });
-    await carregarDoServidor();
+    await carregarDoServidor(true);
     renderAlertas();
   }catch(e){
     toast('Erro ao atualizar alerta: '+e.message, true);
@@ -966,7 +1035,7 @@ async function marcarAnalise(id){
 async function reabrirAlerta(id){
   try{
     await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor();
+    await carregarDoServidor(true);
     renderAlertas();
   }catch(e){
     toast('Erro ao reabrir alerta: '+e.message, true);
@@ -975,7 +1044,7 @@ async function reabrirAlerta(id){
 async function reativarResolvido(id){
   try{
     await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor();
+    await carregarDoServidor(true);
     renderResolvidos();
   }catch(e){
     toast('Erro ao reabrir alerta: '+e.message, true);
@@ -1073,7 +1142,10 @@ function renderResolvidos(){
   el.innerHTML = resolvidos.map(a=>montarCardAlerta(a,'resolvidos')).join('');
 }
 
-/* ================= INICIALIZAÇÃO ================= */
+/* ================= INICIALIZAÇÃO =================
+   CORREÇÃO (ponto 3): se já existe cache local, a página abre
+   instantaneamente com os dados salvos e atualiza em segundo plano.
+   A tela de "carregando" só aparece na primeira abertura de todas. */
 function atualizarRelogio(){
   const d=new Date();
   document.getElementById('dateNow').textContent = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
@@ -1082,9 +1154,14 @@ function atualizarRelogio(){
 async function iniciar(){
   atualizarRelogio();
   setInterval(atualizarRelogio,60000);
-  await carregarDoServidor();
-  await sincronizarAlertas();
-  renderCadastro();
+  if(carregarCache()){
+    renderCadastro();
+    carregarDoServidor(true).then(()=>{ sincronizarAlertas(); });
+  } else {
+    await carregarDoServidor();
+    await sincronizarAlertas();
+    renderCadastro();
+  }
 }
 
 iniciar();
