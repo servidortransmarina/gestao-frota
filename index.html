@@ -607,11 +607,14 @@ function verificarAlerta(placa,tipo){
   return { deveAlertar, excedKm, excedTempo, info, kmAtual, hoje };
 }
 
+
 /*
-   CORREÇÃO (ponto 2): se a planilha ainda estiver com a versão antiga
-   do Apps Script (sem a ação "syncAlertas"), o sistema usa
-   automaticamente as ações antigas (addAlerta/deleteAlerta) como
-   alternativa. Ou seja: os alertas funcionam nas duas versões.
+  Sincroniza alertas com o servidor.
+  - Se a planilha estiver com a versão antiga (sem syncAlertas), usa
+    addAlerta/deleteAlerta como plano B.
+  - Não recria alerta que você já marcou como Resolvido para a mesma
+    condição. Ele só volta se existir uma manutenção daquele tipo
+    lançada DEPOIS da data de resolução (ou seja, um novo ciclo).
 */
 async function sincronizarAlertas(){
   try{
@@ -625,7 +628,17 @@ async function sincronizarAlertas(){
 
         if(check && check.deveAlertar){
           if(!abertoExistente){
-            paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
+            const resolvidos = db.alertas
+              .filter(a=>a.placa===v.placa && a.tipo===tipo && a.status==='resolvido' && a.dataResolucao)
+              .sort((a,b)=> new Date(b.dataResolucao) - new Date(a.dataResolucao));
+            const ultResolvido = resolvidos[0];
+            let deveRecriar = true;
+            if(ultResolvido){
+              deveRecriar = db.manutencoes.some(m=> m.placa===v.placa && m.tipo===tipo && m.data >= ultResolvido.dataResolucao);
+            }
+            if(deveRecriar){
+              paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
+            }
           }
         } else {
           if(abertoExistente){
@@ -634,6 +647,22 @@ async function sincronizarAlertas(){
         }
       }
     }
+
+    if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
+
+    try{
+      await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
+    }catch(e){
+      for(const id of idsParaRemover){ await apiPost('deleteAlerta', { id }); }
+      for(const a of paraAdicionar){ await apiPost('addAlerta', a); }
+    }
+    await carregarDoServidor(true);
+    renderTelaAtual();
+  }catch(e){
+    console.error('Falha ao sincronizar alertas:', e);
+    toast('Alertas não sincronizados: '+e.message, true);
+  }
+}
 
     if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
 
@@ -1013,38 +1042,58 @@ function renderDashboard(){
 }
 
 /* ================= ABA 4: ALERTAS ================= */
+/*
+  Muda o status do alerta. Se a planilha publicada estiver numa versão
+  antiga (sem a ação updateAlerta), usa o plano B: apaga a linha e
+  recria com o mesmo id e o novo status. Funciona nas duas versões.
+*/
+async function mudarStatusAlerta(id, status, dataAnalise, dataResolucao){
+  const a = db.alertas.find(x=>x.id===id);
+  if(!a) throw new Error('Alerta não encontrado.');
+  const payload = { id, placa:a.placa, tipo:a.tipo, status, dataAnalise, dataResolucao };
+  try{
+    await apiPost('updateAlerta', payload);
+  }catch(e){
+    await apiPost('deleteAlerta', { id });
+    await apiPost('addAlerta', payload);
+  }
+  a.status = status;
+  a.dataAnalise = dataAnalise;
+  a.dataResolucao = dataResolucao;
+  salvarCache();
+}
+
 async function marcarResolvido(id){
   try{
-    await apiPost('updateAlerta', { id, status:'resolvido', dataAnalise:null, dataResolucao: hojeISO() });
-    await carregarDoServidor(true);
+    await mudarStatusAlerta(id, 'resolvido', null, hojeISO());
     toast('Alerta marcado como resolvido e movido para o histórico.');
     renderAlertas();
   }catch(e){
     toast('Erro ao resolver alerta: '+e.message, true);
   }
 }
+
 async function marcarAnalise(id){
   try{
-    await apiPost('updateAlerta', { id, status:'analise', dataAnalise: hojeISO(), dataResolucao:null });
-    await carregarDoServidor(true);
+    await mudarStatusAlerta(id, 'analise', hojeISO(), null);
     renderAlertas();
   }catch(e){
     toast('Erro ao atualizar alerta: '+e.message, true);
   }
 }
+
 async function reabrirAlerta(id){
   try{
-    await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor(true);
+    await mudarStatusAlerta(id, 'ativo', null, null);
     renderAlertas();
   }catch(e){
     toast('Erro ao reabrir alerta: '+e.message, true);
   }
 }
+
 async function reativarResolvido(id){
   try{
-    await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor(true);
+    await mudarStatusAlerta(id, 'ativo', null, null);
     renderResolvidos();
   }catch(e){
     toast('Erro ao reabrir alerta: '+e.message, true);
