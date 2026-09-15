@@ -40,6 +40,7 @@ th{color:var(--dim);font-size:11px;text-transform:uppercase;}
 .badge.red{background:rgba(239,68,68,.15);color:#f87171;}
 .badge.yellow{background:rgba(234,179,8,.15);color:#facc15;}
 .badge.green{background:rgba(34,197,94,.15);color:#4ade80;}
+.badge.blue{background:rgba(59,130,246,.15);color:#93c5fd;}
 .grid-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:18px;}
 .kpi{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 16px;}
 .kpi .label{color:var(--dim);font-size:11px;text-transform:uppercase;margin-bottom:6px;}
@@ -56,6 +57,7 @@ th{color:var(--dim);font-size:11px;text-transform:uppercase;}
 .alertcard{background:var(--card);border-left:5px solid var(--danger);border-radius:6px;padding:14px 18px;margin-bottom:12px;}
 .alertcard.analise{border-left-color:var(--warning);}
 .alertcard.resolvido{border-left-color:var(--success);}
+.alertcard.pendente{border-left-color:var(--primary);}
 .alertmsg{font-weight:bold;color:#f87171;margin:8px 0;}
 .toast{position:fixed;bottom:18px;right:18px;background:var(--card);border-left:4px solid var(--success);padding:12px 18px;border-radius:6px;display:none;z-index:2000;max-width:400px;}
 .toast.show{display:block;}
@@ -87,7 +89,6 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
   <button class="navbtn" data-tab="manutencao">Manutenção</button>
   <button class="navbtn" data-tab="dashboard">Dashboard</button>
   <button class="navbtn" data-tab="alertas">Alertas <span id="alertBadge"></span></button>
-  <button class="navbtn" data-tab="resolvidos">Resolvidos</button>
 </nav>
 
 <main>
@@ -148,15 +149,29 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
 
 <section id="tab-alertas" class="tab">
   <div class="card">
-    <h2>Alertas ativos de manutenção</h2>
-    <div id="alertasLista"></div>
+    <div class="row" style="justify-content:space-between;align-items:end;">
+      <div class="field" style="flex:1;max-width:320px;">
+        <label>Buscar por placa</label>
+        <input id="filtroAlertas" placeholder="Digite a placa..." oninput="renderAlertas()">
+      </div>
+      <button class="btn" onclick="abrirModalAgendar()">📅 Agendar manutenção</button>
+    </div>
   </div>
-</section>
-
-<section id="tab-resolvidos" class="tab">
   <div class="card">
-    <h2>Histórico de alertas resolvidos</h2>
-    <div id="resolvidosLista"></div>
+    <h2>📅 Pendentes (manutenções agendadas)</h2>
+    <div id="listaPendentes"></div>
+  </div>
+  <div class="card">
+    <h2>🔴 Atrasados</h2>
+    <div id="listaAtrasados"></div>
+  </div>
+  <div class="card">
+    <h2>🟡 Em análise</h2>
+    <div id="listaAnalise"></div>
+  </div>
+  <div class="card">
+    <h2>✅ Resolvidos</h2>
+    <div id="listaResolvidos"></div>
   </div>
 </section>
 
@@ -231,6 +246,43 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
   </div>
 </div>
 
+<div class="overlay" id="modalAgendar">
+  <div class="modal">
+    <h3>Agendar manutenção</h3>
+    <div class="field" style="margin-bottom:10px;">
+      <label>Veículo *</label>
+      <select id="agPlaca"></select>
+      <small class="errmsg" id="errAgPlaca"></small>
+    </div>
+    <div class="field" style="margin-bottom:10px;">
+      <label>Tipo de manutenção *</label>
+      <select id="agTipo" onchange="toggleOutroAgendar()">
+        <option value="">Selecione...</option>
+        <option value="oleo">Troca de óleo</option>
+        <option value="alinhamento">Alinhamento</option>
+        <option value="oleo_caixa">Troca de óleo da caixa</option>
+        <option value="oleo_diferencial">Troca de óleo do diferencial</option>
+        <option value="outro">Outro</option>
+      </select>
+      <small class="errmsg" id="errAgTipo"></small>
+    </div>
+    <div class="field" id="wrapOutroAgendar" style="display:none;margin-bottom:10px;">
+      <label>Qual manutenção será feita? *</label>
+      <input id="agDescricao" placeholder="Ex: Revisão de freios">
+      <small class="errmsg" id="errAgDescricao"></small>
+    </div>
+    <div class="field" style="margin-bottom:10px;">
+      <label>Data prevista *</label>
+      <input id="agData" type="date">
+      <small class="errmsg" id="errAgData"></small>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeModal('modalAgendar')">Cancelar</button>
+      <button class="btn" id="btnSalvarAgendamento" onclick="salvarAgendamento()">Agendar</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div class="loading-overlay" id="loadingOverlay">Carregando dados da planilha...</div>
 
@@ -259,912 +311,6 @@ const LABEL_ULTIMA = {
   oleo_diferencial:'Último óleo do diferencial'
 };
 
-/* ================= CACHE LOCAL (abertura instantânea) ================= */
-const CACHE_KEY = 'frotaCacheV1';
+/* ================= CACHE LOCAL ================= */
+const CACHE
 
-function salvarCache(){
-  try{ localStorage.setItem(CACHE_KEY, JSON.stringify(db)); }catch(e){}
-}
-
-function carregarCache(){
-  try{
-    const c = localStorage.getItem(CACHE_KEY);
-    if(!c) return false;
-    const dados = JSON.parse(c);
-    if(!dados || !Array.isArray(dados.veiculos)) return false;
-    db = dados;
-    db.veiculos.forEach(v=>garantirLimites(v.placa));
-    return true;
-  }catch(e){ return false; }
-}
-
-/* ================= FILA DE REQUISIÇÕES =================
-   CORREÇÃO (ponto 1): envia as requisições uma de cada vez, em fila.
-   Isso impede o erro que acontecia ao salvar duas vezes seguidas rápido
-   (ex: 440.000 e logo depois 441.000), porque o Google não aceita bem
-   duas escritas simultâneas na mesma planilha. */
-let _fila = Promise.resolve();
-function enfileirar(fn){
-  const p = _fila.then(fn);
-  _fila = p.catch(()=>{});
-  return p;
-}
-
-/* ================= COMUNICAÇÃO COM A PLANILHA ================= */
-function setLoading(v){
-  carregando = v;
-  document.getElementById('loadingOverlay').classList.toggle('show', v);
-}
-
-/*
-   CORREÇÃO (ponto 4): tenta até 3 vezes com pausa entre elas.
-   Resolve o erro de "falha ao carregar" que aparecia na primeira
-   abertura em alguns computadores (o Google às vezes demora para
-   "acordar" e a primeira tentativa falha).
-*/
-async function fetchGetComRetry(url, tentativas){
-  let ultimoErro;
-  for(let i=0; i<(tentativas||3); i++){
-    try{
-      const res = await fetch(url);
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      return res;
-    }catch(e){
-      ultimoErro = e;
-      await new Promise(r=>setTimeout(r, 1000*(i+1)));
-    }
-  }
-  throw ultimoErro;
-}
-
-async function apiGet(){
-  return enfileirar(async ()=>{
-    const res = await fetchGetComRetry(API_URL + '?action=getAll', 3);
-    return res.json();
-  });
-}
-
-async function apiPost(action, data){
-  return enfileirar(async ()=>{
-    const res = await fetch(API_URL, {
-      method:'POST',
-      body: JSON.stringify({ action, data })
-    });
-    if(!res.ok) throw new Error('Falha ao enviar dados para a planilha.');
-    const json = await res.json();
-    if(json.error) throw new Error(json.error);
-    return json;
-  });
-}
-
-function normalizarDadosDaPlanilha(raw){
-  const veiculos = (raw.veiculos||[]).map(v=>({
-    placa: String(v.placa).trim().toUpperCase(),
-    kmAtual: Number(v.kmAtual)||0
-  }));
-
-  const manutencoes = (raw.manutencoes||[]).map(m=>({
-    id: String(m.id),
-    placa: String(m.placa).trim().toUpperCase(),
-    tipo: String(m.tipo||'').trim(),
-    descricao: m.descricao || m['descrição'] || '',
-    km: Number(m.km)||0,
-    data: formatarDataPlanilhaParaISO(m.data),
-    valor: Number(m.valor)||0
-  }));
-
-  const limites = {};
-  (raw.limites||[]).forEach(l=>{
-    const placa = String(l.placa).trim().toUpperCase();
-    if(!limites[placa]) limites[placa] = {};
-    limites[placa][String(l.tipo||'').trim()] = { modo: l.modo, km: Number(l.km)||0, meses: Number(l.meses)||0 };
-  });
-
-  const alertas = (raw.alertas||[]).map(a=>({
-    id: String(a.id),
-    placa: String(a.placa).trim().toUpperCase(),
-    tipo: String(a.tipo||'').trim(),
-    status: a.status || 'ativo',
-    dataAnalise: a.dataAnalise ? formatarDataPlanilhaParaISO(a.dataAnalise) : null,
-    dataResolucao: a.dataResolucao ? formatarDataPlanilhaParaISO(a.dataResolucao) : null
-  }));
-
-  return { veiculos, manutencoes, limites, alertas };
-}
-
-function formatarDataPlanilhaParaISO(valor){
-  if(!valor) return '';
-  if(typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}/.test(valor)) return valor.slice(0,10);
-  const d = new Date(valor);
-  if(isNaN(d.getTime())) return '';
-  const ano = d.getFullYear();
-  const mes = String(d.getMonth()+1).padStart(2,'0');
-  const dia = String(d.getDate()).padStart(2,'0');
-  return `${ano}-${mes}-${dia}`;
-}
-
-/*
-   CORREÇÃO (ponto 3): modo "silencioso" atualiza os dados em segundo
-   plano, sem mostrar a tela de carregamento. Usado na abertura quando
-   já existe cache local.
-*/
-async function carregarDoServidor(silencioso){
-  if(!silencioso) setLoading(true);
-  try{
-    const raw = await apiGet();
-    db = normalizarDadosDaPlanilha(raw);
-    db.veiculos.forEach(v=> garantirLimites(v.placa));
-    salvarCache();
-  }catch(e){
-    if(silencioso) console.error('Erro ao atualizar em segundo plano:', e);
-    else toast('Erro ao carregar dados da planilha: ' + e.message, true);
-  }finally{
-    if(!silencioso) setLoading(false);
-  }
-}
-
-function garantirLimites(placa){
-  if(!db.limites[placa]) db.limites[placa] = {};
-  TIPOS_RASTREADOS.forEach(t=>{
-    if(!db.limites[placa][t]) db.limites[placa][t] = Object.assign({}, LIMITES_PADRAO[t]);
-  });
-}
-
-function gerarId(){
-  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,9);
-}
-
-/* ================= UTIL ================= */
-function fmtData(iso){ if(!iso) return '-'; const [a,m,d]=iso.split('-'); return `${d}/${m}/${a}`; }
-function hojeISO(){ return new Date().toISOString().split('T')[0]; }
-function fmtMoeda(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
-function fmtKm(v){ return (v||0).toLocaleString('pt-BR')+' km'; }
-
-/* Converte número no formato brasileiro: "440.000" vira 440000 | "1.250,00" vira 1250 */
-function parseNumeroBR(str){
-  if(str===null||str===undefined) return NaN;
-  let s=String(str).trim();
-  if(s==='') return NaN;
-  s=s.replace(/\s/g,'').replace(/\./g,'').replace(',','.');
-  return Number(s);
-}
-
-function toast(msg,isErr){
-  const t=document.getElementById('toast');
-  t.textContent=msg;
-  t.className='toast show'+(isErr?' err':'');
-  setTimeout(()=>{t.className='toast';}, isErr?6000:3500);
-}
-function addMeses(iso,meses){ const d=new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+meses); return d.toISOString().split('T')[0]; }
-
-function normalizarPlaca(p){ return p.trim().toUpperCase().replace(/[^A-Z0-9]/g,''); }
-function placaValida(p){
-  const padraoAntigo = /^[A-Z]{3}[0-9]{4}$/;
-  const padraoMercosul = /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/;
-  return padraoAntigo.test(p) || padraoMercosul.test(p);
-}
-
-function closeModal(id){ document.getElementById(id).classList.remove('show'); }
-function openModal(id){ document.getElementById(id).classList.add('show'); }
-
-/* ================= NAVEGAÇÃO ================= */
-function renderTelaAtual(){
-  const tabAtiva=document.querySelector('.navbtn.active').dataset.tab;
-  if(tabAtiva==='manutencao'){ if(veiculoSel) renderDetalhe(); else renderManutTab(); }
-  if(tabAtiva==='dashboard') renderDashboard();
-  if(tabAtiva==='alertas') renderAlertas();
-  if(tabAtiva==='resolvidos') renderResolvidos();
-  if(tabAtiva==='cadastro') renderCadastro();
-}
-
-document.querySelectorAll('.navbtn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.navbtn').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
-
-    if(btn.dataset.tab==='manutencao') renderManutTab();
-    if(btn.dataset.tab==='dashboard') renderDashboard();
-    if(btn.dataset.tab==='alertas') renderAlertas();
-    if(btn.dataset.tab==='resolvidos') renderResolvidos();
-    if(btn.dataset.tab==='cadastro') renderCadastro();
-  });
-});
-
-async function atualizarManualmente(){
-  const btn=document.getElementById('btnAtualizar');
-  btn.disabled=true;
-  await carregarDoServidor();
-  await sincronizarAlertas();
-  renderTelaAtual();
-  toast('Dados atualizados.');
-  btn.disabled=false;
-}
-
-/* ================= ABA 1: CADASTRO ================= */
-async function cadastrarVeiculo(){
-  const input=document.getElementById('inputPlaca');
-  const err=document.getElementById('errPlaca');
-  const btn=document.getElementById('btnCadastrarVeiculo');
-  err.textContent=''; input.classList.remove('err');
-  const placa=normalizarPlaca(input.value);
-  if(!placa){ err.textContent='Informe a placa do veículo.'; input.classList.add('err'); return; }
-  if(!placaValida(placa)){
-    err.textContent='Placa inválida. Use o formato antigo (ABC1234) ou Mercosul (ABC1D23).';
-    input.classList.add('err');
-    return;
-  }
-  if(db.veiculos.some(v=>v.placa===placa)){ err.textContent='Já existe um veículo cadastrado com esta placa.'; input.classList.add('err'); return; }
-
-  btn.disabled=true;
-  try{
-    await apiPost('addVeiculo', { placa });
-    db.veiculos.push({ placa, kmAtual: 0 });
-    garantirLimites(placa);
-    salvarCache();
-    input.value='';
-    toast('Veículo '+placa+' cadastrado com sucesso.');
-    renderCadastro();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao cadastrar: '+e.message, true);
-  }finally{
-    btn.disabled=false;
-  }
-}
-
-function excluirVeiculo(placa){
-  document.getElementById('confirmTitle').textContent='Excluir veículo';
-  document.getElementById('confirmMsg').textContent='Tem certeza de que deseja excluir o veículo '+placa+'? Todo o histórico de manutenções também será removido.';
-  document.getElementById('confirmBtn').onclick=async ()=>{
-    try{
-      await apiPost('deleteVeiculo', { placa });
-      await carregarDoServidor();
-      closeModal('modalConfirm');
-      toast('Veículo '+placa+' excluído.');
-      renderCadastro();
-    }catch(e){
-      toast('Erro ao excluir: '+e.message, true);
-    }
-  };
-  openModal('modalConfirm');
-}
-
-function renderCadastro(){
-  const el=document.getElementById('listaCadastro');
-  if(db.veiculos.length===0){ el.innerHTML='<div class="empty">Nenhum veículo cadastrado ainda.</div>'; return; }
-  let html='<table><thead><tr><th>Placa</th><th>Km atual</th><th>Total gasto</th><th>Manutenções</th><th></th></tr></thead><tbody>';
-  db.veiculos.forEach(v=>{
-    const ms=db.manutencoes.filter(m=>m.placa===v.placa);
-    const total=ms.reduce((s,m)=>s+m.valor,0);
-    html+=`<tr><td><b>${v.placa}</b></td><td>${fmtKm(v.kmAtual)}</td><td>${fmtMoeda(total)}</td><td>${ms.length}</td><td><button class="btn danger small" onclick="excluirVeiculo('${v.placa}')">Excluir</button></td></tr>`;
-  });
-  html+='</tbody></table>';
-  el.innerHTML=html;
-}
-
-/* ================= ABA 2: MANUTENÇÃO ================= */
-let veiculoSel=null;
-
-function statusVeiculo(placa){
-  const al=db.alertas.filter(a=>a.placa===placa && a.status!=='resolvido');
-  if(al.some(a=>a.status==='ativo')) return 'atrasado';
-  if(al.some(a=>a.status==='analise')) return 'analise';
-  return 'ok';
-}
-
-function renderManutTab(){
-  veiculoSel=null;
-  document.getElementById('manutDetalheWrap').style.display='none';
-  document.getElementById('manutListaWrap').style.display='block';
-  const wrap=document.getElementById('chipsVeiculos');
-  if(db.veiculos.length===0){ wrap.innerHTML='<div class="empty">Nenhum veículo cadastrado. Vá até "Cadastro de Veículos".</div>'; return; }
-  wrap.innerHTML=db.veiculos.map(v=>{
-    const st=statusVeiculo(v.placa);
-    const cor= st==='atrasado' ? 'var(--danger)' : (st==='analise' ? 'var(--warning)' : 'var(--success)');
-    return `<span class="chip" onclick="selecionarVeiculo('${v.placa}')"><span class="dot" style="background:${cor}"></span>${v.placa}</span>`;
-  }).join('');
-}
-
-async function selecionarVeiculo(placa){
-  veiculoSel=placa;
-  document.getElementById('manutListaWrap').style.display='none';
-  document.getElementById('manutDetalheWrap').style.display='block';
-  renderDetalhe();
-}
-
-function ultimaManut(placa,tipo){
-  const l=db.manutencoes.filter(m=>m.placa===placa && m.tipo===tipo).sort((a,b)=>new Date(b.data)-new Date(a.data));
-  return l[0]||null;
-}
-
-function calcularLimite(placa,tipo){
-  garantirLimites(placa);
-  const cfg=db.limites[placa][tipo];
-  if(!cfg) return null;
-  const ult=ultimaManut(placa,tipo);
-  if(!ult) return {temUltima:false, cfg};
-  const limiteKm = cfg.modo!=='meses' ? ult.km + Number(cfg.km) : null;
-  const limiteData = cfg.modo!=='km' ? addMeses(ult.data, Number(cfg.meses)) : null;
-  return { temUltima:true, ultima:ult, limiteKm, limiteData, cfg };
-}
-
-function verificarAlerta(placa,tipo){
-  const info=calcularLimite(placa,tipo);
-  if(!info) return null;
-  if(!info.temUltima) return { deveAlertar:true, semHistorico:true, info };
-  const veiculo=db.veiculos.find(v=>v.placa===placa);
-  const kmAtual=veiculo?veiculo.kmAtual:0;
-  const hoje=hojeISO();
-  let excedKm=false, excedTempo=false;
-  if(info.limiteKm!==null && kmAtual>=info.limiteKm) excedKm=true;
-  if(info.limiteData!==null && hoje>=info.limiteData) excedTempo=true;
-  let deveAlertar=false;
-  if(info.cfg.modo==='km') deveAlertar=excedKm;
-  else if(info.cfg.modo==='meses') deveAlertar=excedTempo;
-  else deveAlertar = excedKm || excedTempo;
-  return { deveAlertar, excedKm, excedTempo, info, kmAtual, hoje };
-}
-
-/*
-   CORREÇÃO (ponto 2): se a planilha ainda estiver com a versão antiga
-   do Apps Script (sem a ação "syncAlertas"), o sistema usa
-   automaticamente as ações antigas (addAlerta/deleteAlerta) como
-   alternativa. Ou seja: os alertas funcionam nas duas versões.
-*/
-async function sincronizarAlertas(){
-  try{
-    const paraAdicionar = [];
-    const idsParaRemover = [];
-
-    for(const v of db.veiculos){
-      for(const tipo of TIPOS_RASTREADOS){
-        const check=verificarAlerta(v.placa,tipo);
-        const abertoExistente = db.alertas.find(a=>a.placa===v.placa && a.tipo===tipo && a.status!=='resolvido');
-
-        if(check && check.deveAlertar){
-          if(!abertoExistente){
-            paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
-          }
-        } else {
-          if(abertoExistente){
-            idsParaRemover.push(abertoExistente.id);
-          }
-        }
-      }
-    }
-
-    if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
-
-    try{
-      await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
-    }catch(e){
-      for(const id of idsParaRemover){ await apiPost('deleteAlerta', { id }); }
-      for(const a of paraAdicionar){ await apiPost('addAlerta', a); }
-    }
-    await carregarDoServidor(true);
-    renderTelaAtual();
-  }catch(e){
-    console.error('Falha ao sincronizar alertas:', e);
-    toast('Alertas não sincronizados: '+e.message, true);
-  }
-}
-
-function renderDetalhe(){
-  const placa=veiculoSel;
-  const v=db.veiculos.find(x=>x.placa===placa);
-  if(!v) return;
-  garantirLimites(placa);
-  const ms=db.manutencoes.filter(m=>m.placa===placa).sort((a,b)=>new Date(b.data)-new Date(a.data));
-  const total=ms.reduce((s,m)=>s+m.valor,0);
-  const outros=ms.filter(m=>m.tipo==='outro');
-
-  /* Mostra apenas o limite em km. A data só aparece se o critério for "somente tempo". */
-  function proximoLimiteTexto(tipo){
-    const info=calcularLimite(placa,tipo);
-    if(!info || !info.temUltima) return 'Sem histórico ainda';
-    if(info.limiteKm!==null){
-      const falta = info.limiteKm - v.kmAtual;
-      if(falta>=0) return fmtKm(info.limiteKm)+' (faltam '+fmtKm(falta)+')';
-      return fmtKm(info.limiteKm)+' (excedido há '+fmtKm(-falta)+')';
-    }
-    if(info.limiteData!==null){
-      return fmtData(info.limiteData);
-    }
-    return '-';
-  }
-
-  const cfg=db.limites[placa];
-
-  const cardsTipos = TIPOS_RASTREADOS.map(t=>{
-    const ult=ultimaManut(placa,t);
-    return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult? fmtData(ult.data)+' · '+fmtKm(ult.km) : 'Sem registro'}</div></div>`;
-  }).join('');
-
-  let html = `
-    <div class="back" onclick="renderManutTab()">← Voltar para lista de veículos</div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between;">
-        <div>
-          <h2 style="margin-bottom:4px;">Veículo ${placa}</h2>
-          <div style="color:var(--dim);font-size:13px;">Quilometragem atual: <b style="color:var(--text)">${fmtKm(v.kmAtual)}</b></div>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button class="btn secondary" onclick="abrirModalKm()">Atualizar quilometragem</button>
-          <button class="btn" onclick="abrirModalManutencao()">Adicionar manutenção</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid-cards">
-      <div class="kpi"><div class="label">Total gasto</div><div class="value">${fmtMoeda(total)}</div></div>
-      <div class="kpi"><div class="label">Nº manutenções</div><div class="value">${ms.length}</div></div>
-      ${cardsTipos}
-      <div class="kpi"><div class="label">Outras manutenções</div><div class="value">${outros.length}</div></div>
-    </div>
-
-    <div class="card">
-      <h2>Configuração de alertas por tipo de manutenção</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-        ${TIPOS_RASTREADOS.map(tipo=>`
-          <div class="limitbox">
-            <div style="font-weight:bold;margin-bottom:8px;">${TIPOS[tipo]}</div>
-            <div class="row">
-              <div class="field">
-                <label>Critério</label>
-                <select onchange="atualizarCfg('${placa}','${tipo}','modo',this.value)">
-                  <option value="km" ${cfg[tipo].modo==='km'?'selected':''}>Somente quilometragem</option>
-                  <option value="meses" ${cfg[tipo].modo==='meses'?'selected':''}>Somente tempo (meses)</option>
-                  <option value="km_e_meses" ${cfg[tipo].modo==='km_e_meses'?'selected':''}>Quilometragem ou tempo (o que vencer primeiro)</option>
-                </select>
-              </div>
-            </div>
-            <div class="row" style="margin-top:8px;">
-              <div class="field">
-                <label>A cada (km)</label>
-                <input type="number" min="0" value="${cfg[tipo].km}" onchange="atualizarCfg('${placa}','${tipo}','km',this.value)">
-              </div>
-              <div class="field">
-                <label>A cada (meses)</label>
-                <input type="number" min="0" value="${cfg[tipo].meses}" onchange="atualizarCfg('${placa}','${tipo}','meses',this.value)">
-              </div>
-            </div>
-            <div style="margin-top:8px;font-size:12px;color:var(--dim);">Próximo limite: <b style="color:var(--text)">${proximoLimiteTexto(tipo)}</b></div>
-          </div>
-        `).join('')}
-      </div>
-    </div>
-
-    <div class="card">
-      <h2>Histórico de manutenções</h2>
-      ${ms.length===0 ? '<div class="empty">Nenhuma manutenção registrada para este veículo.</div>' : `
-      <table>
-        <thead><tr><th>Data</th><th>Km</th><th>Tipo</th><th>Descrição</th><th>Valor</th><th></th></tr></thead>
-        <tbody>
-          ${ms.map(m=>`
-            <tr>
-              <td>${fmtData(m.data)}</td>
-              <td>${fmtKm(m.km)}</td>
-              <td>${m.tipo==='outro' ? 'Outro' : (TIPOS[m.tipo] || m.tipo)}</td>
-              <td>${m.tipo==='outro' ? (m.descricao||'-') : '-'}</td>
-              <td>${fmtMoeda(m.valor)}</td>
-              <td>
-                <button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button>
-                <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>`}
-    </div>
-  `;
-
-  document.getElementById('manutDetalheWrap').innerHTML = html;
-}
-
-async function atualizarCfg(placa,tipo,campo,valor){
-  garantirLimites(placa);
-  if(campo==='modo') db.limites[placa][tipo].modo = valor;
-  else db.limites[placa][tipo][campo] = Number(valor) || 0;
-
-  try{
-    await apiPost('updateLimite', {
-      placa, tipo,
-      modo: db.limites[placa][tipo].modo,
-      km: db.limites[placa][tipo].km,
-      meses: db.limites[placa][tipo].meses
-    });
-    salvarCache();
-    renderDetalhe();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao salvar configuração: '+e.message, true);
-  }
-}
-
-function abrirModalKm(){
-  const v=db.veiculos.find(v=>v.placa===veiculoSel);
-  document.getElementById('kmAtualInput').value = v.kmAtual>0 ? Number(v.kmAtual).toLocaleString('pt-BR') : '';
-  document.getElementById('errKmAtual').textContent='';
-  openModal('modalKm');
-}
-
-/*
-   CORREÇÃO (ponto 1): o botão é liberado logo após salvar o km.
-   A sincronização de alertas roda em segundo plano, sem travar a tela.
-*/
-async function salvarKmAtual(){
-  const input=document.getElementById('kmAtualInput');
-  const err=document.getElementById('errKmAtual');
-  const btn=document.getElementById('btnSalvarKm');
-  err.textContent=''; input.classList.remove('err');
-  const val=parseNumeroBR(input.value);
-  if(input.value.trim()===''||isNaN(val)||val<0){ err.textContent='Informe uma quilometragem válida (não negativa).'; input.classList.add('err'); return; }
-
-  btn.disabled=true;
-  try{
-    await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: val });
-    const v=db.veiculos.find(x=>x.placa===veiculoSel);
-    if(v) v.kmAtual=val;
-    salvarCache();
-    closeModal('modalKm');
-    toast('Quilometragem atualizada.');
-    renderDetalhe();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao atualizar quilometragem: '+e.message, true);
-  }finally{
-    btn.disabled=false;
-  }
-}
-
-/* ---- Cadastro/edição de manutenção ---- */
-let editandoId=null;
-
-function toggleOutro(){
-  const tipo=document.getElementById('mTipo').value;
-  document.getElementById('wrapOutro').style.display = tipo==='outro' ? 'block':'none';
-}
-
-function mostrarUltimaInfo(){
-  const tipo=document.getElementById('mTipo').value;
-  const box=document.getElementById('ultimaInfoBox');
-  if(!tipo || tipo==='outro'){ box.style.display='none'; return; }
-  const ult=ultimaManut(veiculoSel,tipo);
-  if(!ult){
-    box.style.display='block';
-    box.textContent = 'Este veículo ainda não possui registro de ' + TIPOS[tipo].toLowerCase() + '.';
-    return;
-  }
-  box.style.display='block';
-  box.textContent = 'Última ' + TIPOS[tipo].toLowerCase() + ': ' + fmtData(ult.data) + ' (com ' + fmtKm(ult.km) + ').';
-}
-
-function abrirModalManutencao(){
-  editandoId=null;
-  document.getElementById('manutTitle').textContent='Adicionar manutenção — '+veiculoSel;
-  document.getElementById('mTipo').value='';
-  document.getElementById('mDescricao').value='';
-  document.getElementById('mKm').value='';
-  document.getElementById('mData').value=hojeISO();
-  document.getElementById('mValor').value='';
-  document.getElementById('ultimaInfoBox').style.display='none';
-  toggleOutro();
-  ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
-  openModal('modalManut');
-}
-
-function editarManutencao(id){
-  const m=db.manutencoes.find(x=>x.id===id);
-  if(!m) return;
-  editandoId=m.id;
-  document.getElementById('manutTitle').textContent='Editar manutenção — '+veiculoSel;
-  document.getElementById('mTipo').value=m.tipo;
-  document.getElementById('mDescricao').value=m.descricao||'';
-  document.getElementById('mKm').value=m.km>0?Number(m.km).toLocaleString('pt-BR'):'';
-  document.getElementById('mData').value=m.data;
-  document.getElementById('mValor').value=m.valor>0?Number(m.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
-  toggleOutro();
-  mostrarUltimaInfo();
-  ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
-  openModal('modalManut');
-}
-
-async function salvarManutencao(){
-  const tipo=document.getElementById('mTipo').value;
-  const descricao=document.getElementById('mDescricao').value.trim();
-  const km=document.getElementById('mKm').value;
-  const data=document.getElementById('mData').value;
-  const valor=document.getElementById('mValor').value;
-  const btn=document.getElementById('btnSalvarManut');
-
-  let valido=true;
-  ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
-
-  const kmVal=parseNumeroBR(km);
-  let valorVal=0;
-
-  if(!tipo){ document.getElementById('errTipo').textContent='Selecione o tipo de manutenção.'; valido=false; }
-  if(tipo==='outro' && !descricao){ document.getElementById('errDescricao').textContent='Descreva a manutenção realizada.'; valido=false; }
-  if(km.trim()===''||isNaN(kmVal)||kmVal<0){ document.getElementById('errKm').textContent='Informe uma quilometragem válida (não negativa).'; valido=false; }
-  if(!data){ document.getElementById('errData').textContent='Informe a data da manutenção.'; valido=false; }
-  if(valor.trim()!==''){
-    valorVal=parseNumeroBR(valor);
-    if(isNaN(valorVal)||valorVal<0){ document.getElementById('errValor').textContent='Valor inválido. Informe um valor válido ou deixe em branco.'; valido=false; }
-  }
-
-  if(!valido) return;
-
-  btn.disabled=true;
-  try{
-    const registro = {
-      id: editandoId || gerarId(),
-      placa: veiculoSel,
-      tipo,
-      descricao: tipo==='outro'?descricao:'',
-      km:kmVal,
-      data,
-      valor:valorVal
-    };
-
-    if(editandoId){
-      await apiPost('updateManutencao', registro);
-      const i=db.manutencoes.findIndex(x=>x.id===editandoId);
-      if(i>=0) db.manutencoes[i]=registro;
-    } else {
-      await apiPost('addManutencao', registro);
-      db.manutencoes.push(registro);
-    }
-
-    const v=db.veiculos.find(x=>x.placa===veiculoSel);
-    if(v && kmVal > v.kmAtual){
-      await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: kmVal });
-      v.kmAtual=kmVal;
-    }
-
-    salvarCache();
-    closeModal('modalManut');
-    toast('Manutenção salva com sucesso.');
-    renderDetalhe();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao salvar manutenção: '+e.message, true);
-  }finally{
-    btn.disabled=false;
-  }
-}
-
-function excluirManutencao(id){
-  document.getElementById('confirmTitle').textContent='Excluir manutenção';
-  document.getElementById('confirmMsg').textContent='Tem certeza de que deseja excluir esta manutenção?';
-  document.getElementById('confirmBtn').onclick=async ()=>{
-    try{
-      await apiPost('deleteManutencao', { id });
-      db.manutencoes = db.manutencoes.filter(m=>m.id!==id);
-      salvarCache();
-      closeModal('modalConfirm');
-      toast('Manutenção excluída.');
-      renderDetalhe();
-      sincronizarAlertas();
-    }catch(e){
-      toast('Erro ao excluir: '+e.message, true);
-    }
-  };
-  openModal('modalConfirm');
-}
-
-/* ================= ABA 3: DASHBOARD ================= */
-function preencherSelectDashboard(){
-  const sel=document.getElementById('dashVeiculo');
-  const atual=sel.value;
-  sel.innerHTML='<option value="todos">Todos os veículos</option>' + db.veiculos.map(v=>`<option value="${v.placa}">${v.placa}</option>`).join('');
-  if([...sel.options].some(o=>o.value===atual)) sel.value=atual;
-}
-
-function filtrarPorPeriodo(lista,periodo){
-  if(periodo==='todos') return lista;
-  const hoje=new Date();
-  let limite;
-  if(periodo==='mes'){ limite=new Date(hoje.getFullYear(),hoje.getMonth(),1); }
-  else if(periodo==='3m'){ limite=new Date(hoje); limite.setMonth(limite.getMonth()-3); }
-  else if(periodo==='6m'){ limite=new Date(hoje); limite.setMonth(limite.getMonth()-6); }
-  else if(periodo==='12m'){ limite=new Date(hoje); limite.setMonth(limite.getMonth()-12); }
-  return lista.filter(m=> new Date(m.data+'T00:00:00') >= limite);
-}
-
-function renderDashboard(){
-  preencherSelectDashboard();
-  const veiculo=document.getElementById('dashVeiculo').value;
-  const periodo=document.getElementById('dashPeriodo').value;
-
-  let ms = veiculo==='todos' ? db.manutencoes.slice() : db.manutencoes.filter(m=>m.placa===veiculo);
-  ms = filtrarPorPeriodo(ms,periodo);
-
-  const total = ms.reduce((s,m)=>s+m.valor,0);
-  const qtd = ms.length;
-  const totalVeiculos = db.veiculos.length;
-
-  let msParaRanking = filtrarPorPeriodo(db.manutencoes, periodo);
-  const gastoPorVeiculo = {};
-  msParaRanking.forEach(m=>{ gastoPorVeiculo[m.placa]=(gastoPorVeiculo[m.placa]||0)+m.valor; });
-  let maiorPlaca='-', maiorValor=0;
-  Object.entries(gastoPorVeiculo).forEach(([p,v])=>{ if(v>maiorValor){maiorValor=v; maiorPlaca=p;} });
-
-  document.getElementById('dashKpis').innerHTML=`
-    <div class="kpi"><div class="label">Gasto total</div><div class="value">${fmtMoeda(total)}</div></div>
-    <div class="kpi"><div class="label">Nº de manutenções</div><div class="value">${qtd}</div></div>
-    <div class="kpi"><div class="label">Total de veículos</div><div class="value">${totalVeiculos}</div></div>
-    <div class="kpi"><div class="label">Veículo com maior gasto</div><div class="value" style="font-size:18px;">${maiorPlaca!=='-'?maiorPlaca+' — '+fmtMoeda(maiorValor):'-'}</div></div>
-  `;
-
-  const chartData = veiculo==='todos'
-    ? db.veiculos.map(v=>({placa:v.placa, valor: gastoPorVeiculo[v.placa]||0}))
-    : [{placa:veiculo, valor: total}];
-
-  const maxVal = Math.max(1, ...chartData.map(d=>d.valor));
-  document.getElementById('dashChart').innerHTML = chartData.length===0 ? '<div class="empty">Sem dados para exibir.</div>' :
-    chartData.map(d=>`
-      <div class="bar-row">
-        <div class="bar-label">${d.placa}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${(d.valor/maxVal*100).toFixed(1)}%">${fmtMoeda(d.valor)}</div></div>
-      </div>
-    `).join('');
-}
-
-/* ================= ABA 4: ALERTAS ================= */
-async function marcarResolvido(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'resolvido', dataAnalise:null, dataResolucao: hojeISO() });
-    await carregarDoServidor(true);
-    toast('Alerta marcado como resolvido e movido para o histórico.');
-    renderAlertas();
-  }catch(e){
-    toast('Erro ao resolver alerta: '+e.message, true);
-  }
-}
-async function marcarAnalise(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'analise', dataAnalise: hojeISO(), dataResolucao:null });
-    await carregarDoServidor(true);
-    renderAlertas();
-  }catch(e){
-    toast('Erro ao atualizar alerta: '+e.message, true);
-  }
-}
-async function reabrirAlerta(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor(true);
-    renderAlertas();
-  }catch(e){
-    toast('Erro ao reabrir alerta: '+e.message, true);
-  }
-}
-async function reativarResolvido(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor(true);
-    renderResolvidos();
-  }catch(e){
-    toast('Erro ao reabrir alerta: '+e.message, true);
-  }
-}
-
-function montarCardAlerta(a, contexto){
-  const info=calcularLimite(a.placa,a.tipo);
-  const v=db.veiculos.find(x=>x.placa===a.placa);
-  const kmAtual=v?v.kmAtual:0;
-  const hoje=hojeISO();
-  const nomeTipo = TIPOS[a.tipo] || a.tipo;
-  const semHistorico = !info || !info.temUltima;
-
-  let motivo='';
-  if(semHistorico){
-    motivo='ALERTA: veículo sem registro de '+nomeTipo.toLowerCase()+'. Veículo deve ser inspecionado.';
-  } else {
-    const excedKm = info.limiteKm!==null && kmAtual>=info.limiteKm;
-    const excedTempo = info.limiteData!==null && hoje>=info.limiteData;
-    if(excedKm && excedTempo) motivo='ALERTA: quilometragem e prazo excedidos. Veículo deve ser inspecionado.';
-    else if(excedKm) motivo='ALERTA: quilometragem excedida. Veículo deve ser inspecionado.';
-    else if(excedTempo) motivo='ALERTA: prazo excedido. Veículo deve ser inspecionado.';
-    else motivo='Situação regularizada.';
-  }
-
-  let badgeStatus='';
-  let classeExtra='';
-  if(a.status==='ativo'){ badgeStatus='<span class="badge red">🔴 ATRASADO</span>'; }
-  else if(a.status==='analise'){ badgeStatus=`<span class="badge yellow">🟡 EM ANÁLISE ${a.dataAnalise? '('+fmtData(a.dataAnalise)+')' : ''}</span>`; classeExtra='analise'; }
-  else if(a.status==='resolvido'){ badgeStatus=`<span class="badge green">✅ RESOLVIDO ${a.dataResolucao? '('+fmtData(a.dataResolucao)+')' : ''}</span>`; classeExtra='resolvido'; }
-
-  let acoes='';
-  if(contexto==='ativos'){
-    acoes = a.status==='ativo'
-      ? `<button class="btn success small" onclick="marcarResolvido('${a.id}')">Resolvido</button>
-         <button class="btn warn small" onclick="marcarAnalise('${a.id}')">Em análise</button>`
-      : `<button class="btn success small" onclick="marcarResolvido('${a.id}')">Resolvido</button>
-         <button class="btn secondary small" onclick="reabrirAlerta('${a.id}')">Reabrir</button>`;
-  } else {
-    acoes = `<button class="btn secondary small" onclick="reativarResolvido('${a.id}')">Reabrir alerta</button>`;
-  }
-
-  const detalhes = semHistorico ? `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
-        <div>Última manutenção: <b style="color:var(--text)">Sem registro</b></div>
-        <div>Km atual do veículo: <b style="color:var(--text)">${fmtKm(kmAtual)}</b></div>
-      </div>`
-    : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
-        <div>Última manutenção: <b style="color:var(--text)">${fmtData(info.ultima.data)}</b></div>
-        <div>Km da última manutenção: <b style="color:var(--text)">${fmtKm(info.ultima.km)}</b></div>
-        <div>Km atual do veículo: <b style="color:var(--text)">${fmtKm(kmAtual)}</b></div>
-        ${info.limiteKm!==null ? `<div>Limite de km: <b style="color:var(--text)">${fmtKm(info.limiteKm)}</b></div>` : ''}
-        ${info.limiteData!==null ? `<div>Limite de prazo: <b style="color:var(--text)">${fmtData(info.limiteData)}</b></div>` : ''}
-      </div>`;
-
-  return `
-    <div class="alertcard ${classeExtra}">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center;">
-        <div style="font-size:16px;font-weight:bold;">${a.placa} — ${nomeTipo}</div>
-        ${badgeStatus}
-      </div>
-      ${detalhes}
-      <div class="alertmsg">${motivo}</div>
-      <div style="display:flex;gap:8px;">${acoes}</div>
-    </div>
-  `;
-}
-
-function renderAlertas(){
-  const el=document.getElementById('alertasLista');
-  const badge=document.getElementById('alertBadge');
-  const ativosLista = db.alertas.filter(a=>a.status==='ativo' || a.status==='analise');
-  const ativos = db.alertas.filter(a=>a.status==='ativo').length;
-  badge.textContent = ativos>0 ? '('+ativos+')' : '';
-
-  if(ativosLista.length===0){
-    el.innerHTML='<div class="empty">Nenhum alerta no momento. Todos os veículos estão em dia. ✅</div>';
-    return;
-  }
-
-  const ordenados = ativosLista.slice().sort((a,b)=> a.status==='ativo' ? -1 : 1);
-  el.innerHTML = ordenados.map(a=>montarCardAlerta(a,'ativos')).join('');
-}
-
-function renderResolvidos(){
-  const el=document.getElementById('resolvidosLista');
-  const resolvidos = db.alertas.filter(a=>a.status==='resolvido').sort((a,b)=> new Date(b.dataResolucao||0) - new Date(a.dataResolucao||0));
-
-  if(resolvidos.length===0){
-    el.innerHTML='<div class="empty">Nenhum alerta resolvido ainda.</div>';
-    return;
-  }
-  el.innerHTML = resolvidos.map(a=>montarCardAlerta(a,'resolvidos')).join('');
-}
-
-/* ================= INICIALIZAÇÃO =================
-   CORREÇÃO (ponto 3): se já existe cache local, a página abre
-   instantaneamente com os dados salvos e atualiza em segundo plano.
-   A tela de "carregando" só aparece na primeira abertura de todas. */
-function atualizarRelogio(){
-  const d=new Date();
-  document.getElementById('dateNow').textContent = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-}
-
-async function iniciar(){
-  atualizarRelogio();
-  setInterval(atualizarRelogio,60000);
-  if(carregarCache()){
-    renderCadastro();
-    carregarDoServidor(true).then(()=>{ sincronizarAlertas(); });
-  } else {
-    await carregarDoServidor();
-    await sincronizarAlertas();
-    renderCadastro();
-  }
-}
-
-iniciar();
-</script>
-</body>
-</html>
