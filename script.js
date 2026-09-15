@@ -368,7 +368,17 @@ async function sincronizarAlertas(){
 
         if(check && check.deveAlertar){
           if(!abertoExistente){
-            paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
+            const resolvidos = db.alertas
+              .filter(a=>a.placa===v.placa && a.tipo===tipo && a.status==='resolvido' && a.dataResolucao)
+              .sort((a,b)=> new Date(b.dataResolucao) - new Date(a.dataResolucao));
+            const ultResolvido = resolvidos[0];
+            let deveRecriar = true;
+            if(ultResolvido){
+              deveRecriar = db.manutencoes.some(m=> m.placa===v.placa && m.tipo===tipo && m.data >= ultResolvido.dataResolucao);
+            }
+            if(deveRecriar){
+              paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
+            }
           }
         } else {
           if(abertoExistente){
