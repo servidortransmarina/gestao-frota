@@ -24,7 +24,7 @@ const LABEL_ULTIMA = {
   oleo_diferencial:'Último óleo do diferencial'
 };
 
-/* ================= CACHE LOCAL (abertura instantânea) ================= */
+/* ================= CACHE LOCAL ================= */
 const CACHE_KEY = 'frotaCacheV1';
 
 function salvarCache(){
