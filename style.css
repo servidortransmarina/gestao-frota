@@ -1,8 +1,13 @@
 :root{--bg:#0f172a;--card:#1e293b;--border:#334155;--text:#e2e8f0;--dim:#94a3b8;--primary:#3b82f6;--success:#22c55e;--warning:#eab308;--danger:#ef4444;}
 *{box-sizing:border-box;}
 body{margin:0;font-family:Arial,sans-serif;background:var(--bg);color:var(--text);}
-header{background:#1e3a8a;padding:16px 24px;display:flex;justify-content:space-between;align-items:center;}
-.header-logo{height:40px;margin:0;} /* Estilo para a imagem do logo */
+
+header{background:#1e3a8a;padding:25px 24px;display:flex;justify-content:space-between;align-items:center;}
+.header-left{display:flex;align-items:center;}
+.header-right{display:flex;align-items:center;gap:14px;font-size:13px;}
+.header-logo{height:100px;margin:0;}
+.header-title{font-size:24px;color:var(--text);margin:0;margin-left:15px;}
+
 nav{display:flex;background:var(--card);border-bottom:1px solid var(--border);flex-wrap:wrap;}
 nav button{background:none;border:none;color:var(--dim);padding:14px 20px;font-size:14px;cursor:pointer;border-bottom:3px solid transparent;font-weight:bold;}
 nav button.active{color:var(--primary);border-bottom-color:var(--primary);}
@@ -60,3 +65,4 @@ th{color:var(--dim);font-size:11px;text-transform:uppercase;}
 .bar-fill{background:var(--primary);height:100%;color:#fff;font-size:11px;padding-left:6px;line-height:20px;font-weight:bold;white-space:nowrap;}
 .loading-overlay{display:none;position:fixed;inset:0;background:rgba(15,23,42,.85);align-items:center;justify-content:center;z-index:3000;font-size:16px;color:var(--text);}
 .loading-overlay.show{display:flex;}
+.alertcard.agendado{border-left-color:var(--warning);}
