@@ -111,10 +111,17 @@
 
 <div class="overlay" id="modalManut">
   <div class="modal">
-    <h3 id="manutTitle">Adicionar manutenção</h3>
+    <h3 id="manutTitle">Marcar manutenção</h3>
+    <div class="field">
+      <label>Situação *</label>
+      <select id="mModo" onchange="onModoChange()">
+        <option value="realizada">Manutenção já realizada</option>
+        <option value="agendar">Agendar para o futuro</option>
+      </select>
+    </div>
     <div class="field">
       <label>Tipo de manutenção *</label>
-      <select id="mTipo" onchange="toggleManutOutro()">
+      <select id="mTipo" onchange="onTipoChange()">
         <option value="">Selecione...</option>
         <option value="oleo">Troca de óleo</option>
         <option value="alinhamento">Alinhamento</option>
@@ -124,27 +131,34 @@
       </select>
       <small class="errmsg" id="errMTipo"></small>
     </div>
-    <div class="field" id="wrapManutOutro" style="display:none;margin-top:10px;">
-      <label>Qual foi a manutenção realizada? *</label>
-      <input type="text" id="mDescricao" placeholder="Ex.: Troca de pastilha de freio">
+    <div class="field" id="mDescricaoWrap" style="display:none;">
+      <label>Qual manutenção será feita? *</label>
+      <input type="text" id="mDescricao" list="descricoesList" placeholder="Ex.: Troca de pastilha de freio">
+      <datalist id="descricoesList"></datalist>
     </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Quilometragem no momento (em branco = km atual do veículo)</label>
-      <input type="number" id="mKm" min="0" placeholder="Deixe em branco para usar a km atual">
-      <small class="errmsg" id="errMKm"></small>
+    <div class="row" id="mKmDataRow">
+      <div class="field">
+        <label>Quilometragem (em branco = km atual)</label>
+        <input type="number" id="mKm" placeholder="Ex.: 45000">
+        <small class="errmsg" id="errMKm"></small>
+      </div>
+      <div class="field">
+        <label>Data *</label>
+        <input type="date" id="mData">
+        <small class="errmsg" id="errMData"></small>
+      </div>
     </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Data da manutenção *</label>
-      <input type="date" id="mData">
-      <small class="errmsg" id="errMData"></small>
+    <div class="field" id="mDataPrevistaWrap" style="display:none;">
+      <label>Data prevista (opcional)</label>
+      <input type="date" id="mDataPrevista">
     </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Valor gasto (R$) — opcional</label>
-      <input type="number" id="mValor" min="0" step="0.01" placeholder="0,00">
+    <div class="field">
+      <label>Valor (R$)</label>
+      <input type="number" id="mValor" min="0" step="0.01">
     </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Observação — opcional</label>
-      <input type="text" id="mObs" placeholder="Ex.: trocado filtro junto, NF 123">
+    <div class="field">
+      <label>Observação</label>
+      <input type="text" id="mObs" placeholder="Opcional">
     </div>
     <div class="modal-actions">
       <button class="btn secondary" onclick="closeModal('modalManut')">Cancelar</button>
@@ -168,45 +182,7 @@
   </div>
 </div>
 
-<div class="overlay" id="modalAgend">
-  <div class="modal">
-    <h3 id="agendTitle">Agendar manutenção</h3>
-    <div class="field">
-      <label>Tipo de manutenção *</label>
-      <select id="aTipo" onchange="toggleAgendOutro()">
-        <option value="">Selecione...</option>
-        <option value="oleo">Troca de óleo</option>
-        <option value="alinhamento">Alinhamento</option>
-        <option value="oleo_caixa">Troca de óleo da caixa</option>
-        <option value="oleo_diferencial">Troca de óleo do diferencial</option>
-        <option value="outro">Outro</option>
-      </select>
-      <small class="errmsg" id="errATipo"></small>
-    </div>
-    <div class="field" id="wrapAgendOutro" style="display:none;margin-top:10px;">
-      <label>Qual manutenção será feita? *</label>
-      <input id="aDescricao" type="text">
-      <small class="errmsg" id="errADescricao"></small>
-    </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Data prevista (opcional)</label>
-      <input id="aDataPrevista" type="date">
-    </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Valor previsto (R$) — opcional</label>
-      <input id="aValor" type="text" inputmode="decimal">
-      <small class="errmsg" id="errAValor"></small>
-    </div>
-    <div class="field" style="margin-top:10px;">
-      <label>Observação (opcional)</label>
-      <input id="aObs" type="text" placeholder="Ex.: oficina, peça encomendada...">
-    </div>
-    <div class="modal-actions">
-      <button class="btn secondary" onclick="closeModal('modalAgend')">Cancelar</button>
-      <button class="btn" id="btnSalvarAgend" onclick="salvarAgendamento()">Salvar</button>
-    </div>
-  </div>
-</div>
+
 
 <div class="toast" id="toast"></div>
 <div class="loading-overlay" id="loadingOverlay">Carregando dados da planilha...</div>
