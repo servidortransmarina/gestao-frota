@@ -258,20 +258,29 @@ async function cadastrarVeiculo(){
   if(db.veiculos.some(v=>v.placa===placa)){ err.textContent='Já existe um veículo cadastrado com esta placa.'; input.classList.add('err'); return; }
 
   btn.disabled=true;
-  try{
-    await apiPost('addVeiculo', { placa });
-    db.veiculos.push({ placa, kmAtual: 0 });
-    garantirLimites(placa);
-    salvarCache();
-    input.value='';
-    toast('Veículo '+placa+' cadastrado com sucesso.');
-    renderCadastro();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao cadastrar: '+e.message, true);
-  }finally{
-    btn.disabled=false;
-  }
+  btn.textContent='Cadastrando...';
+
+  // 1) Atualiza a tela imediatamente
+  db.veiculos.push({ placa, kmAtual: 0 });
+  garantirLimites(placa);
+  salvarCache();
+  input.value='';
+  renderCadastro();
+  toast('Veículo '+placa+' cadastrado. Sincronizando com a planilha...');
+
+  // 2) Envia para a planilha em segundo plano
+  apiPost('addVeiculo', { placa })
+    .then(()=> sincronizarAlertas())
+    .catch(e=>{
+      db.veiculos = db.veiculos.filter(v=>v.placa!==placa);
+      salvarCache();
+      renderCadastro();
+      toast('Erro ao salvar na planilha: '+e.message+' — o cadastro foi desfeito.', true);
+    })
+    .finally(()=>{
+      btn.disabled=false;
+      btn.textContent='Cadastrar';
+    });
 }
 
 function excluirVeiculo(placa){
@@ -456,9 +465,8 @@ function renderDetalhe(){
           <div style="color:var(--dim);font-size:13px;">Quilometragem atual: <b style="color:var(--text)">${fmtKm(v.kmAtual)}</b></div>
         </div>
         <div style="display:flex;gap:8px;">
-          <button class="btn secondary" onclick="abrirModalKm()">Atualizar quilometragem</button>
-          <button class="btn warn" onclick="abrirModalAgendamento('${placa}')">Agendar manutenção</button>
-          <button class="btn" onclick="abrirModalManutencao()">Adicionar manutenção</button>
+          <button class="btn secondary" onclick="abrirModalKm('${placa}')">Atualizar quilometragem</button>
+          <button class="btn" onclick="abrirModalManut('${placa}')">Marcar manutenção</button>
         </div>
       </div>
     </div>
@@ -502,18 +510,16 @@ function renderDetalhe(){
       </div>
     </div>
 
-    <div class="card">
+        <div class="card">
       <h2>Histórico de manutenções</h2>
-      ${ms.length===0 ? '<div class="empty">Nenhuma manutenção registrada para este veículo.</div>' : `
       <table>
         <thead><tr><th>Tipo</th><th>Data</th><th>Quilometragem</th><th>Valor</th><th>Observação</th><th>Ações</th></tr></thead>
         <tbody>
           ${ms.map(m=>`
             <tr>
+              <td>${m.tipo==='outro' ? (m.descricao||'Outro') : (TIPOS[m.tipo]||m.tipo)}</td>
               <td>${fmtData(m.data)}</td>
               <td>${fmtKm(m.km)}</td>
-              <td>${m.tipo==='outro' ? 'Outro' : (TIPOS[m.tipo] || m.tipo)}</td>
-              <td>${m.tipo==='outro' ? (m.descricao||'-') : '-'}</td>
               <td>${fmtMoeda(m.valor)}</td>
               <td>${m.observacao || '-'}</td>
               <td>
@@ -523,7 +529,7 @@ function renderDetalhe(){
             </tr>
           `).join('')}
         </tbody>
-      </table>`}
+      </table>
     </div>
         ${agends.length ? `
     <div class="card">
@@ -624,139 +630,245 @@ function mostrarUltimaInfo(){
   box.textContent = 'Última ' + TIPOS[tipo].toLowerCase() + ': ' + fmtData(ult.data) + ' (com ' + fmtKm(ult.km) + ').';
 }
 
-function abrirModalManutencao(){
-  editandoId=null;
-  document.getElementById('manutTitle').textContent='Adicionar manutenção — '+veiculoSel;
-  document.getElementById('mTipo').value='';
-  document.getElementById('mDescricao').value='';
-  document.getElementById('mKm').value='';
-  document.getElementById('mData').value=hojeISO();
-  document.getElementById('mValor').value='';
-    document.getElementById('mObs').value = manut ? (manut.observacao||'') : '';
-  document.getElementById('ultimaInfoBox').style.display='none';
-  toggleOutro();
-  ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
+
+/* ============ BLOCO DE CORREÇÃO ============ */
+
+function voltarCadastro(){
+  renderManutTab();
+}
+
+function onTipoChange(){
+  const tipo = document.getElementById('mTipo').value;
+  document.getElementById('mDescricaoWrap').style.display = tipo==='outro' ? 'block' : 'none';
+}
+
+function onModoChange(){
+  const agendar = document.getElementById('mModo').value==='agendar';
+  document.getElementById('mKmDataRow').style.display = agendar ? 'none' : '';
+  document.getElementById('mDataPrevistaWrap').style.display = agendar ? 'block' : 'none';
+}
+
+function atualizarDescricoes(){
+  const dl = document.getElementById('descricoesList');
+  if(!dl) return;
+  const descricoes = new Set();
+  db.manutencoes.forEach(m=>{ if(m.tipo==='outro' && m.descricao) descricoes.add(String(m.descricao).trim()); });
+  db.agendamentos.forEach(a=>{ if(a.tipo==='outro' && a.descricao) descricoes.add(String(a.descricao).trim()); });
+  dl.innerHTML = [...descricoes].map(d=>`<option value="${String(d).replace(/"/g,'&quot;')}"></option>`).join('');
+}
+
+function abrirModalManut(placa, manut, modo){
+  veiculoSel = placa;
+  manutEditId = manut ? manut.id : null;
+  document.getElementById('manutTitle').textContent = (manut?'Editar':'Marcar')+' manutenção — '+placa;
+  const mModo = document.getElementById('mModo');
+  mModo.value = modo || 'realizada';
+  mModo.disabled = !!manut;
+  document.getElementById('mTipo').value = manut?manut.tipo:'';
+  document.getElementById('mDescricao').value = manut?(manut.descricao||''):'';
+  document.getElementById('mDescricaoWrap').style.display = manut && manut.tipo==='outro' ? 'block' : 'none';
+  document.getElementById('mKm').value = manut?manut.km:'';
+  document.getElementById('mData').value = manut?manut.data : hojeISO();
+  document.getElementById('mDataPrevista').value = '';
+  document.getElementById('mValor').value = manut?manut.valor:'';
+  document.getElementById('mObs').value = manut?(manut.observacao||''):'';
+  errMTipo.textContent=''; errMKm.textContent=''; errMData.textContent='';
+  onModoChange();
+  atualizarDescricoes();
   openModal('modalManut');
 }
 
 function editarManutencao(id){
-  const m=db.manutencoes.find(x=>x.id===id);
-  if(!m) return;
-  editandoId=m.id;
-  document.getElementById('manutTitle').textContent='Editar manutenção — '+veiculoSel;
-  document.getElementById('mTipo').value=m.tipo;
-  document.getElementById('mDescricao').value=m.descricao||'';
-  document.getElementById('mKm').value=m.km>0?Number(m.km).toLocaleString('pt-BR'):'';
-  document.getElementById('mData').value=m.data;
-  document.getElementById('mValor').value=m.valor>0?Number(m.valor).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}):'';
-  toggleOutro();
-  mostrarUltimaInfo();
-  ['errTipo','errDescricao','errKm','errData','errValor'].forEach(id=>document.getElementById(id).textContent='');
-  openModal('modalManut');
+  abrirModalManut(veiculoSel, db.manutencoes.find(m=>m.id===id));
 }
 
 async function salvarManutencao(){
+  const modo = document.getElementById('mModo').value;
   const tipo = document.getElementById('mTipo').value;
   const descricao = document.getElementById('mDescricao').value.trim();
   const kmInput = document.getElementById('mKm').value;
   const data = document.getElementById('mData').value;
+  const dataPrevista = document.getElementById('mDataPrevista').value;
   const valor = Number(document.getElementById('mValor').value)||0;
   const obs = document.getElementById('mObs').value.trim();
 
   let valido = true;
   errMTipo.textContent=''; errMKm.textContent=''; errMData.textContent='';
   if(!tipo){ errMTipo.textContent='Selecione o tipo de manutenção.'; valido=false; }
-  if(tipo==='outro' && !descricao){ errMTipo.textContent='Descreva a manutenção realizada.'; valido=false; }
-  if(kmInput && Number(kmInput)<=0){ errMKm.textContent='Informe uma quilometragem válida.'; valido=false; }
-  if(!data){ errMData.textContent='Informe a data da manutenção.'; valido=false; }
+  if(tipo==='outro' && !descricao){ errMTipo.textContent='Descreva a manutenção.'; valido=false; }
+  if(modo!=='agendar'){
+    if(kmInput && Number(kmInput)<=0){ errMKm.textContent='Informe uma quilometragem válida.'; valido=false; }
+    if(!data){ errMData.textContent='Informe a data da manutenção.'; valido=false; }
+  }
   if(!valido) return;
-
-  const v = db.veiculos.find(x=>x.placa===veiculoSel);
-  const km = kmInput ? Number(kmInput) : (v ? v.kmAtual : 0);
 
   const btn = document.getElementById('btnSalvarManut');
   btn.disabled = true;
-  try{
-    if(manutEditId){
-      const registro = { id:manutEditId, placa:veiculoSel, tipo, descricao: tipo==='outro'?descricao:'', km, data, valor, observacao:obs };
-      await apiPost('updateManutencao', registro);
-      const idx = db.manutencoes.findIndex(m=>m.id===manutEditId);
-      if(idx>=0) db.manutencoes[idx] = registro;
-    } else {
-      const registro = { id:gerarId(), placa:veiculoSel, tipo, descricao: tipo==='outro'?descricao:'', km, data, valor, observacao:obs };
-      await apiPost('addManutencao', registro);
-      db.manutencoes.push(registro);
-    }
+  btn.textContent = 'Salvando...';
 
-    // se havia agendamento deste tipo para o veículo, ele foi cumprido
-    const normDesc = s => (s||'').trim().toLowerCase();
-    const agCumpridos = db.agendamentos.filter(a=>
-      a.placa===veiculoSel && a.tipo===tipo && (tipo!=='outro' || normDesc(a.descricao)===normDesc(descricao))
-    );
-    for(const ag of agCumpridos){
-      await apiPost('deleteAgendamento', { id: ag.id });
-      db.agendamentos = db.agendamentos.filter(a=>a.id!==ag.id);
-    }
+  const placa = veiculoSel;
+  const v = db.veiculos.find(x=>x.placa===placa);
+  const normDesc = s => (s||'').trim().toLowerCase();
 
-    if(v && km > v.kmAtual){
-      await apiPost('updateKmVeiculo', { placa: v.placa, kmAtual: km });
-      v.kmAtual = km;
-    }
-
+  /* ---------- MODO AGENDAR ---------- */
+  if(modo==='agendar'){
+    const ag = { id:gerarId(), placa, tipo, descricao: tipo==='outro'?descricao:'', dataPrevista: dataPrevista||'', valor, observacao:obs, criadoEm:hojeISO() };
+    db.agendamentos.push(ag);
     salvarCache();
     closeModal('modalManut');
-    toast('Manutenção salva.');
-    renderDetalhe();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao salvar manutenção: '+e.message, true);
-  }finally{
-    btn.disabled = false;
+    toast('Manutenção agendada para '+placa+'. Sincronizando...');
+    renderTelaAtual();
+    apiPost('addAgendamento', ag)
+      .catch(e=>{
+        db.agendamentos = db.agendamentos.filter(a=>a.id!==ag.id);
+        salvarCache();
+        renderTelaAtual();
+        toast('Erro ao salvar na planilha: '+e.message+' — o agendamento foi desfeito.', true);
+      })
+      .finally(()=>{ btn.disabled=false; btn.textContent='Salvar'; });
+    return;
   }
+
+  /* ---------- MODO REALIZADA ---------- */
+  const km = kmInput ? Number(kmInput) : (v ? v.kmAtual : 0);
+  const editando = !!manutEditId;
+  const registro = { id: editando ? manutEditId : gerarId(), placa, tipo, descricao: tipo==='outro'?descricao:'', km, data, valor, observacao:obs };
+
+  // backups para desfazer em caso de erro
+  const manutAnterior = editando ? db.manutencoes.find(m=>m.id===manutEditId) : null;
+  const kmAnterior = v ? v.kmAtual : 0;
+  const agCumpridos = db.agendamentos.filter(a=>
+    a.placa===placa && a.tipo===tipo && (tipo!=='outro' || normDesc(a.descricao)===normDesc(descricao))
+  );
+
+  // 1) aplica na hora na tela
+  if(editando){
+    const idx = db.manutencoes.findIndex(m=>m.id===manutEditId);
+    if(idx>=0) db.manutencoes[idx] = registro;
+  } else {
+    db.manutencoes.push(registro);
+  }
+  db.agendamentos = db.agendamentos.filter(a=>!agCumpridos.includes(a));
+  if(v && km > v.kmAtual) v.kmAtual = km;
+  salvarCache();
+  closeModal('modalManut');
+  toast('Manutenção salva. Sincronizando com a planilha...');
+  renderDetalhe();
+  sincronizarAlertas();
+
+  // 2) manda para a planilha em segundo plano
+  (async ()=>{
+    try{
+      await apiPost(editando ? 'updateManutencao' : 'addManutencao', registro);
+      for(const ag of agCumpridos){
+        await apiPost('deleteAgendamento', { id: ag.id });
+      }
+      if(v && km > kmAnterior){
+        await apiPost('updateKmVeiculo', { placa: v.placa, kmAtual: km });
+      }
+    }catch(e){
+      if(editando){
+        const idx = db.manutencoes.findIndex(m=>m.id===registro.id);
+        if(idx>=0 && manutAnterior) db.manutencoes[idx] = manutAnterior;
+      } else {
+        db.manutencoes = db.manutencoes.filter(m=>m.id!==registro.id);
+      }
+      db.agendamentos = db.agendamentos.concat(agCumpridos);
+      if(v) v.kmAtual = kmAnterior;
+      salvarCache();
+      renderDetalhe();
+      sincronizarAlertas();
+      toast('Erro ao salvar na planilha: '+e.message+' — a alteração foi desfeita.', true);
+    }finally{
+      btn.disabled=false;
+      btn.textContent='Salvar';
+    }
+  })();
 }
 
 function excluirManutencao(id){
+  const m = db.manutencoes.find(x=>x.id===id);
   document.getElementById('confirmTitle').textContent='Excluir manutenção';
-  document.getElementById('confirmMsg').textContent='Tem certeza de que deseja excluir esta manutenção?';
+  document.getElementById('confirmMsg').textContent='Excluir esta manutenção do histórico?';
   document.getElementById('confirmBtn').onclick=async ()=>{
     try{
-      const m = db.manutencoes.find(x=>x.id===id);
       await apiPost('deleteManutencao', { id });
       db.manutencoes = db.manutencoes.filter(x=>x.id!==id);
-
       if(m){
-        // 1) remove da aba Resolvidos os registros gerados por esta manutenção
-        const tipoAlerta = m.tipo==='outro' ? (m.descricao||'outro') : m.tipo;
-        const aindaExisteOutra = db.manutencoes.some(x=> x.placa===m.placa && x.tipo===m.tipo && x.data===m.data);
-        if(!aindaExisteOutra){
-          const orfaos = db.alertas.filter(a=> a.status==='resolvido' && a.placa===m.placa && a.tipo===tipoAlerta && a.dataResolucao===m.data);
-          for(const al of orfaos){
-            await apiPost('deleteAlerta', { id: al.id });
-            db.alertas = db.alertas.filter(a=>a.id!==al.id);
-          }
-        }
-
-        // 2) se a exclusão fez o limite estourar de novo, o alerta volta como ativo
-        const check = verificarAlerta(m.placa, m.tipo);
-        const temAberto = db.alertas.some(a=>a.placa===m.placa && a.tipo===m.tipo && a.status!=='resolvido');
-        if(check && check.deveAlertar && !temAberto){
-          const novo = { id:gerarId(), placa:m.placa, tipo:m.tipo, status:'ativo', dataAnalise:null, dataResolucao:null };
-          await apiPost('addAlerta', novo);
-          db.alertas.push(novo);
+        const normDesc = s => (s||'').trim().toLowerCase();
+        const orfaos = db.alertas.filter(a =>
+          a.status==='resolvido' &&
+          a.placa===m.placa &&
+          a.dataResolucao===m.data &&
+          (a.tipo===m.tipo || (m.tipo==='outro' && normDesc(a.tipo)===normDesc(m.descricao)))
+        );
+        for(const a of orfaos){
+          await apiPost('deleteAlerta', { id: a.id });
+          db.alertas = db.alertas.filter(x=>x.id!==a.id);
         }
       }
-
       salvarCache();
       closeModal('modalConfirm');
       toast('Manutenção excluída.');
       renderDetalhe();
       sincronizarAlertas();
     }catch(e){
-      toast('Erro ao excluir: '+e.message, true);
+      toast('Erro ao excluir manutenção: '+e.message, true);
     }
   };
   openModal('modalConfirm');
 }
+
+async function resolverAgendamento(id){
+  const ag = db.agendamentos.find(a=>a.id===id);
+  if(!ag) return;
+  const v = db.veiculos.find(x=>x.placa===ag.placa);
+  try{
+    const registro = {
+      id: gerarId(),
+      placa: ag.placa,
+      tipo: ag.tipo,
+      descricao: ag.descricao || '',
+      km: v ? v.kmAtual : 0,
+      data: ag.dataPrevista || hojeISO(),
+      valor: Number(ag.valor)||0,
+      observacao: ag.observacao || ''
+    };
+    await apiPost('addManutencao', registro);
+    db.manutencoes.push(registro);
+
+    await apiPost('deleteAgendamento', { id: ag.id });
+    db.agendamentos = db.agendamentos.filter(a=>a.id!==ag.id);
+
+    const tipoAlerta = ag.tipo==='outro' ? (ag.descricao||'outro') : ag.tipo;
+    const existeAberto = db.alertas.some(a=>a.placa===ag.placa && a.tipo===tipoAlerta && a.status!=='resolvido');
+    if(!existeAberto){
+      const reg = { id: gerarId(), placa: ag.placa, tipo: tipoAlerta, status:'resolvido', dataAnalise:null, dataResolucao: registro.data };
+      await apiPost('addAlerta', reg);
+      db.alertas.push(reg);
+    }
+
+    salvarCache();
+    toast('Manutenção registrada no histórico de ' + ag.placa + '.');
+    renderTelaAtual();
+    sincronizarAlertas();
+  }catch(e){
+    toast('Erro ao resolver agendamento: '+e.message, true);
+  }
+}
+
+async function cancelarAgendamento(id){
+  try{
+    await apiPost('deleteAgendamento', { id });
+    db.agendamentos = db.agendamentos.filter(a=>a.id!==id);
+    salvarCache();
+    toast('Agendamento cancelado.');
+    renderTelaAtual();
+  }catch(e){
+    toast('Erro ao cancelar agendamento: '+e.message, true);
+  }
+}
+
 
 /* ================= ABA 3: DASHBOARD ================= */
 function preencherSelectDashboard(){
@@ -819,143 +931,16 @@ function renderDashboard(){
 /* ================= AGENDAMENTOS ================= */
 let agendPlaca = null;
 
-function abrirModalAgendamento(placa){
-  agendPlaca = placa;
-  document.getElementById('agendTitle').textContent = 'Agendar manutenção — ' + placa;
-  document.getElementById('aTipo').value = '';
-  document.getElementById('aDescricao').value = '';
-  document.getElementById('aDataPrevista').value = '';
-  document.getElementById('aValor').value = '';
-  document.getElementById('aObs').value = '';
-  document.getElementById('errATipo').textContent = '';
-  document.getElementById('errADescricao').textContent = '';
-  document.getElementById('errAValor').textContent = '';
-  toggleAgendOutro();
-  openModal('modalAgend');
-}
+
 
 function toggleAgendOutro(){
   const tipo = document.getElementById('aTipo').value;
   document.getElementById('wrapAgendOutro').style.display = tipo==='outro' ? 'block' : 'none';
 }
 
-async function salvarAgendamento(){
-  const tipo = document.getElementById('aTipo').value;
-  const descricao = document.getElementById('aDescricao').value.trim();
-  const dataPrevista = document.getElementById('aDataPrevista').value;
-  const valorStr = document.getElementById('aValor').value;
-  const obs = document.getElementById('aObs').value.trim();
 
-  let valido = true;
-  document.getElementById('errATipo').textContent = '';
-  document.getElementById('errADescricao').textContent = '';
-  document.getElementById('errAValor').textContent = '';
 
-  if(!tipo){ document.getElementById('errATipo').textContent = 'Selecione o tipo de manutenção.'; valido = false; }
-  if(tipo==='outro' && !descricao){ document.getElementById('errADescricao').textContent = 'Descreva a manutenção.'; valido = false; }
 
-  let valorVal = 0;
-  if(valorStr.trim()!==''){
-    valorVal = parseNumeroBR(valorStr);
-    if(isNaN(valorVal) || valorVal<0){ document.getElementById('errAValor').textContent = 'Valor inválido.'; valido = false; }
-  }
-  if(!valido) return;
-
-  if(tipo!=='outro' && db.agendamentos.some(a=>a.placa===agendPlaca && a.tipo===tipo)){
-    toast('Já existe um agendamento deste tipo para ' + agendPlaca + '.', true);
-    return;
-  }
-
-  const btn = document.getElementById('btnSalvarAgend');
-  btn.disabled = true;
-  try{
-    const ag = {
-      id: gerarId(),
-      placa: agendPlaca,
-      tipo,
-      descricao: tipo==='outro' ? descricao : '',
-      dataPrevista: dataPrevista || '',
-      valor: valorVal,
-      observacao: obs,
-      criadoEm: hojeISO()
-    };
-    await apiPost('addAgendamento', ag);
-    db.agendamentos.push(ag);
-    salvarCache();
-    closeModal('modalAgend');
-    toast('Manutenção agendada para ' + ag.placa + '. Veja na aba Alertas.');
-    renderTelaAtual();
-  }catch(e){
-    toast('Erro ao agendar: ' + e.message, true);
-  }finally{
-    btn.disabled = false;
-  }
-}
-
-function cancelarAgendamento(id){
-  document.getElementById('confirmTitle').textContent = 'Cancelar agendamento';
-  document.getElementById('confirmMsg').textContent = 'Tem certeza de que deseja cancelar este agendamento?';
-  document.getElementById('confirmBtn').onclick = async ()=>{
-    try{
-      await apiPost('deleteAgendamento', { id });
-      db.agendamentos = db.agendamentos.filter(a=>a.id!==id);
-      salvarCache();
-      closeModal('modalConfirm');
-      toast('Agendamento cancelado.');
-      renderTelaAtual();
-    }catch(e){
-      toast('Erro ao cancelar agendamento: ' + e.message, true);
-    }
-  };
-  openModal('modalConfirm');
-}
-
-async function resolverAgendamento(id){
-  const ag = db.agendamentos.find(a=>a.id===id);
-  if(!ag) return;
-  try{
-    const v = db.veiculos.find(x=>x.placa===ag.placa);
-        const registro = {
-      id: gerarId(),
-      placa: ag.placa,
-      tipo: ag.tipo,
-      descricao: ag.descricao || '',
-      km: v ? v.kmAtual : 0,
-      data: ag.dataPrevista || hojeISO(),
-      valor: Number(ag.valor)||0,
-      observacao: ag.observacao || ''
-    };
-    await apiPost('addManutencao', registro);
-    db.manutencoes.push(registro);
-
-    await apiPost('deleteAgendamento', { id: ag.id });
-    db.agendamentos = db.agendamentos.filter(a=>a.id!==ag.id);
-
-    // deixa registro na aba Resolvidos.
-    // Se já existe um alerta aberto para este veículo/tipo, a sincronização
-    // vai resolver esse alerta automaticamente — então não criamos outro.
-    const alertaAberto = db.alertas.find(a=>a.placa===ag.placa && a.tipo===ag.tipo && a.status!=='resolvido');
-    if(!alertaAberto){
-      const resolvido = {
-        id: gerarId(),
-        placa: ag.placa,
-        tipo: ag.tipo==='outro' ? (ag.descricao || 'outro') : ag.tipo,
-        status: 'resolvido',
-        dataAnalise: null,
-        dataResolucao: registro.data
-      };
-      await apiPost('addAlerta', resolvido);
-      db.alertas.push(resolvido);
-    }
-
-    salvarCache();
-    toast('Manutenção registrada no histórico de ' + ag.placa + '.');
-    renderTelaAtual();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao resolver agendamento: ' + e.message, true);
-  }
-}
 
 function montarCardAgendamento(g){
   const nomeTipo = g.tipo==='outro' ? (g.descricao || 'Outro') : (TIPOS[g.tipo] || g.tipo);
