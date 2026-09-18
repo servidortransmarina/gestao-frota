@@ -1,1149 +1,1038 @@
 const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3dF-t59QLeh7aJoawxgndTfDDsuP5bs_F9sjJ9P_4lyVVj/exec";
 
-/* ================= ESTADO ================= */
-let db = { veiculos:[], manutencoes:[], limites:{}, alertas:[], agendamentos:[] };
+/* ================= ESTADO E CACHE ================= */
+let db = { veiculos: [], manutencoes: [], limites: {}, alertas: [], agendamentos: [] };
 let carregando = false;
 
-const TIPOS = {
-  oleo:'Troca de óleo',
-  alinhamento:'Alinhamento',
-  oleo_caixa:'Troca de óleo da caixa',
-  oleo_diferencial:'Troca de óleo do diferencial'
+const TIPOS = { 
+  oleo: 'Troca de óleo', 
+  alinhamento: 'Alinhamento', 
+  oleo_caixa: 'Troca de óleo da caixa', 
+  oleo_diferencial: 'Troca de óleo do diferencial' 
 };
-const TIPOS_RASTREADOS = ['oleo','alinhamento','oleo_caixa','oleo_diferencial'];
+const TIPOS_RASTREADOS = ['oleo', 'alinhamento', 'oleo_caixa', 'oleo_diferencial'];
 const LIMITES_PADRAO = {
-  oleo:{modo:'km_e_meses', km:15000, meses:12},
-  alinhamento:{modo:'km_e_meses', km:20000, meses:6},
-  oleo_caixa:{modo:'km_e_meses', km:100000, meses:24},
-  oleo_diferencial:{modo:'km_e_meses', km:100000, meses:24}
+  oleo: { modo: 'km_e_meses', km: 15000, meses: 12 }, 
+  alinhamento: { modo: 'km_e_meses', km: 20000, meses: 6 },
+  oleo_caixa: { modo: 'km_e_meses', km: 100000, meses: 24 }, 
+  oleo_diferencial: { modo: 'km_e_meses', km: 100000, meses: 24 }
 };
-const LABEL_ULTIMA = {
-  oleo:'Última troca de óleo',
-  alinhamento:'Último alinhamento',
-  oleo_caixa:'Último óleo da caixa',
-  oleo_diferencial:'Último óleo do diferencial'
+const LABEL_ULTIMA = { 
+  oleo: 'Última troca de óleo', 
+  alinhamento: 'Último alinhamento', 
+  oleo_caixa: 'Último óleo da caixa', 
+  oleo_diferencial: 'Último óleo do diferencial' 
 };
-
-/* ================= CACHE LOCAL ================= */
 const CACHE_KEY = 'frotaCacheV2';
 
-function salvarCache(){
-  try{ localStorage.setItem(CACHE_KEY, JSON.stringify(db)); }catch(e){}
+function salvarCache() { 
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify(db)); } catch(e) {} 
 }
 
-function carregarCache(){
-  try{
+function carregarCache() {
+  try {
     const c = localStorage.getItem(CACHE_KEY);
-    if(!c) return false;
+    if (!c) return false;
     const dados = JSON.parse(c);
-    if(!dados || !Array.isArray(dados.veiculos)) return false;
+    if (!dados || !Array.isArray(dados.veiculos)) return false;
     db = dados;
-    if(!Array.isArray(db.agendamentos)) db.agendamentos = [];
-    db.veiculos.forEach(v=>garantirLimites(v.placa));
+    if (!Array.isArray(db.agendamentos)) db.agendamentos = [];
+    db.veiculos.forEach(v => garantirLimites(v.placa));
     return true;
-  }catch(e){ return false; }
+  } catch(e) { return false; }
 }
 
-/* ================= FILA DE REQUISIÇÕES ================= */
+/* ================= FILA E COMUNICAÇÃO OTIMIZADA ================= */
 let _fila = Promise.resolve();
-function enfileirar(fn){
+function enfileirar(fn) {
   const p = _fila.then(fn);
-  _fila = p.catch(()=>{});
+  _fila = p.catch(() => {});
   return p;
 }
 
-/* ================= COMUNICAÇÃO COM A PLANILHA ================= */
-function setLoading(v){
+function setLoading(v) {
   carregando = v;
   document.getElementById('loadingOverlay').classList.toggle('show', v);
 }
 
-async function fetchGetComRetry(url, tentativas){
-  let ultimoErro;
-  for(let i=0; i<(tentativas||3); i++){
-    try{
-      const res = await fetch(url);
-      if(!res.ok) throw new Error('HTTP '+res.status);
-      return res;
-    }catch(e){
-      ultimoErro = e;
-      await new Promise(r=>setTimeout(r, 1000*(i+1)));
-    }
-  }
-  throw ultimoErro;
-}
-
-async function apiGet(){
-  return enfileirar(async ()=>{
-    const res = await fetchGetComRetry(API_URL + '?action=getAll', 3);
-    return res.json();
+// Executa em segundo plano com auto-recuperação
+function execBackground(asyncFn, failMsg) {
+  asyncFn().catch(e => {
+    console.error(e);
+    toast(failMsg + '. Recarregando dados oficiais...', true);
+    carregarDoServidor(true).then(() => renderTelaAtual());
   });
 }
 
-async function apiPost(action, data){
-  return enfileirar(async ()=>{
-    const res = await fetch(API_URL, {
-      method:'POST',
-      body: JSON.stringify({ action, data })
+async function apiGet() {
+  return enfileirar(async () => {
+    for (let i = 0; i < 3; i++) {
+      try {
+        const res = await fetch(API_URL + '?action=getAll');
+        if (res.ok) return res.json();
+      } catch(e) { 
+        await new Promise(r => setTimeout(r, 1000 * (i + 1))); 
+      }
+    }
+    throw new Error('Falha de conexão.');
+  });
+}
+
+async function apiPost(action, data) {
+  return enfileirar(async () => {
+    const res = await fetch(API_URL, { 
+      method: 'POST', 
+      body: JSON.stringify({ action, data }) 
     });
-    if(!res.ok) throw new Error('Falha ao enviar dados para a planilha.');
+    if (!res.ok) throw new Error('Falha ao enviar dados para a planilha.');
     const json = await res.json();
-    if(json.error) throw new Error(json.error);
+    if (json.error) throw new Error(json.error);
     return json;
   });
 }
 
-function normalizarDadosDaPlanilha(raw){
-  const veiculos = (raw.veiculos||[]).map(v=>({
-    placa: String(v.placa).trim().toUpperCase(),
-    kmAtual: Number(v.kmAtual)||0
+function normalizarDadosDaPlanilha(raw) {
+  const veiculos = (raw.veiculos || []).map(v => ({ 
+    placa: String(v.placa).trim().toUpperCase(), 
+    kmAtual: Number(v.kmAtual) || 0 
   }));
-
-    const manutencoes = (raw.manutencoes||[]).map(m=>({
-    id: String(m.id),
-    placa: String(m.placa).trim().toUpperCase(),
-    tipo: String(m.tipo||'').trim(),
-    descricao: m.descricao || m['descrição'] || '',
-    km: Number(m.km)||0,
-    data: formatarDataPlanilhaParaISO(m.data),
-    valor: Number(m.valor)||0,
+  
+  const manutencoes = (raw.manutencoes || []).map(m => ({
+    id: String(m.id), 
+    placa: String(m.placa).trim().toUpperCase(), 
+    tipo: String(m.tipo || '').trim().toLowerCase(),
+    descricao: String(m.descricao || m['descrição'] || m['Descricao'] || m['Descrição'] || m['descriçao'] || m['Descriçao'] || '').trim(),
+    km: Number(m.km) || 0, 
+    data: formatarDataPlanilhaParaISO(m.data), 
+    valor: Number(m.valor) || 0, 
     observacao: m.observacao || ''
   }));
-
+  
   const limites = {};
-  (raw.limites||[]).forEach(l=>{
-    const placa = String(l.placa).trim().toUpperCase();
-    if(!limites[placa]) limites[placa] = {};
-    limites[placa][String(l.tipo||'').trim()] = { modo: l.modo, km: Number(l.km)||0, meses: Number(l.meses)||0 };
+  (raw.limites || []).forEach(l => {
+    const p = String(l.placa).trim().toUpperCase();
+    if (!limites[p]) limites[p] = {};
+    limites[p][String(l.tipo || '').trim()] = { 
+      modo: l.modo, 
+      km: Number(l.km) || 0, 
+      meses: Number(l.meses) || 0 
+    };
   });
-
-  const alertas = (raw.alertas||[]).map(a=>({
-    id: String(a.id),
-    placa: String(a.placa).trim().toUpperCase(),
-    tipo: String(a.tipo||'').trim(),
+  
+  const alertas = (raw.alertas || []).map(a => ({
+    id: String(a.id), 
+    placa: String(a.placa).trim().toUpperCase(), 
+    tipo: String(a.tipo || '').trim(), 
     status: a.status || 'ativo',
-    dataAnalise: a.dataAnalise ? formatarDataPlanilhaParaISO(a.dataAnalise) : null,
+    dataAnalise: a.dataAnalise ? formatarDataPlanilhaParaISO(a.dataAnalise) : null, 
     dataResolucao: a.dataResolucao ? formatarDataPlanilhaParaISO(a.dataResolucao) : null
   }));
-  const agendamentos = (raw.agendamentos||[]).map(a=>({
-  id: String(a.id),
-  placa: String(a.placa).trim().toUpperCase(),
-  tipo: String(a.tipo||'').trim(),
-  descricao: a.descricao || '',
-  dataPrevista: a.dataPrevista ? formatarDataPlanilhaParaISO(a.dataPrevista) : '',
-  valor: Number(a.valor)||0,
-  observacao: a.observacao || '',
-  criadoEm: a.criadoEm ? formatarDataPlanilhaParaISO(a.criadoEm) : ''
-}));
+  
+  const agendamentos = (raw.agendamentos || []).map(a => ({
+    id: String(a.id), 
+    placa: String(a.placa).trim().toUpperCase(), 
+    tipo: String(a.tipo || '').trim(),
+    descricao: a.descricao || a['descrição'] || a['Descricao'] || a['Descrição'] || a['descriçao'] || a['Descriçao'] || '',
+    dataPrevista: a.dataPrevista ? formatarDataPlanilhaParaISO(a.dataPrevista) : '', 
+    valor: Number(a.valor) || 0,
+    observacao: a.observacao || '', 
+    criadoEm: a.criadoEm ? formatarDataPlanilhaParaISO(a.criadoEm) : ''
+  }));
+
+  manutencoes.forEach(m => {
+    if (m.tipo !== 'outro' || m.descricao) return;
+    const alerta = alertas.find(a => a.placa === m.placa && a.status === 'resolvido' && a.dataResolucao === m.data && a.tipo && !TIPOS[a.tipo]);
+    if (alerta) m.descricao = String(alerta.tipo).trim();
+  });
+  
   return { veiculos, manutencoes, limites, alertas, agendamentos };
 }
 
-function formatarDataPlanilhaParaISO(valor){
-  if(!valor) return '';
-  if(typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}/.test(valor)) return valor.slice(0,10);
+function formatarDataPlanilhaParaISO(valor) {
+  if (!valor) return '';
+  if (typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}/.test(valor)) return valor.slice(0, 10);
   const d = new Date(valor);
-  if(isNaN(d.getTime())) return '';
-  const ano = d.getFullYear();
-  const mes = String(d.getMonth()+1).padStart(2,'0');
-  const dia = String(d.getDate()).padStart(2,'0');
-  return `${ano}-${mes}-${dia}`;
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-async function carregarDoServidor(silencioso){
-  if(!silencioso) setLoading(true);
-  try{
+async function carregarDoServidor(silencioso) {
+  if (!silencioso) setLoading(true);
+  try {
     const raw = await apiGet();
     db = normalizarDadosDaPlanilha(raw);
-    db.veiculos.forEach(v=> garantirLimites(v.placa));
+    db.veiculos.forEach(v => garantirLimites(v.placa));
     salvarCache();
-  }catch(e){
-    if(silencioso) console.error('Erro ao atualizar em segundo plano:', e);
-    else toast('Erro ao carregar dados da planilha: ' + e.message, true);
-  }finally{
-    if(!silencioso) setLoading(false);
+  } catch(e) {
+    if (!silencioso) toast('Erro ao carregar dados da planilha: ' + e.message, true);
+  } finally {
+    if (!silencioso) setLoading(false);
   }
 }
 
-function garantirLimites(placa){
-  if(!db.limites[placa]) db.limites[placa] = {};
-  TIPOS_RASTREADOS.forEach(t=>{
-    if(!db.limites[placa][t]) db.limites[placa][t] = Object.assign({}, LIMITES_PADRAO[t]);
+function garantirLimites(placa) {
+  if (!db.limites[placa]) db.limites[placa] = {};
+  TIPOS_RASTREADOS.forEach(t => { 
+    if (!db.limites[placa][t]) db.limites[placa][t] = Object.assign({}, LIMITES_PADRAO[t]); 
   });
 }
 
-function gerarId(){
-  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,9);
+function gerarId() { 
+  return 'id_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 9); 
 }
 
-/* ================= UTIL ================= */
-function fmtData(iso){ if(!iso) return '-'; const [a,m,d]=iso.split('-'); return `${d}/${m}/${a}`; }
-function hojeISO(){ return new Date().toISOString().split('T')[0]; }
-function fmtMoeda(v){ return (v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}); }
-function fmtKm(v){ return (v||0).toLocaleString('pt-BR')+' km'; }
-
-function parseNumeroBR(str){
-  if(str===null||str===undefined) return NaN;
-  let s=String(str).trim();
-  if(s==='') return NaN;
-  s=s.replace(/\s/g,'').replace(/\./g,'').replace(',','.');
-  return Number(s);
+/* ================= UTILIDADES ================= */
+function fmtData(iso) { 
+  if (!iso) return '-'; 
+  const [a, m, d] = iso.split('-'); 
+  return `${d}/${m}/${a}`; 
 }
 
-function toast(msg,isErr){
-  const t=document.getElementById('toast');
-  t.textContent=msg;
-  t.className='toast show'+(isErr?' err':'');
-  setTimeout(()=>{t.className='toast';}, isErr?6000:3500);
-}
-function addMeses(iso,meses){ const d=new Date(iso+'T00:00:00'); d.setMonth(d.getMonth()+meses); return d.toISOString().split('T')[0]; }
+function hojeISO() { return new Date().toISOString().split('T')[0]; }
 
-function normalizarPlaca(p){ return p.trim().toUpperCase().replace(/[^A-Z0-9]/g,''); }
-function placaValida(p){
-  const padraoAntigo = /^[A-Z]{3}[0-9]{4}$/;
-  const padraoMercosul = /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/;
-  return padraoAntigo.test(p) || padraoMercosul.test(p);
+function hojeLocal() { 
+  const d = new Date(); 
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); 
 }
 
-function closeModal(id){ document.getElementById(id).classList.remove('show'); }
-function openModal(id){ document.getElementById(id).classList.add('show'); }
+function fmtMoeda(v) { 
+  return (v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }); 
+}
+
+function fmtKm(v) { 
+  return (v || 0).toLocaleString('pt-BR') + ' km'; 
+}
+
+function parseNumeroBR(str) {
+  if (str === null || str === undefined) return NaN;
+  let s = String(str).trim();
+  if (s === '') return NaN;
+  return Number(s.replace(/\s/g, '').replace(/\./g, '').replace(',', '.'));
+}
+
+function toast(msg, isErr) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isErr ? ' err' : '');
+  setTimeout(() => { t.className = 'toast'; }, isErr ? 6000 : 3500);
+}
+
+function addMeses(iso, meses) { 
+  const d = new Date(iso + 'T00:00:00'); 
+  d.setMonth(d.getMonth() + meses); 
+  return d.toISOString().split('T')[0]; 
+}
+
+function normalizarPlaca(p) { return p.trim().toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function placaValida(p) { return /^[A-Z]{3}[0-9]{4}$/.test(p) || /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(p); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function nomeTipo(t) { return TIPOS[t] || t; }
+
+function nomeManutencao(item) {
+  const tipo = String(item?.tipo || '').trim().toLowerCase();
+  if (tipo === 'outro') {
+    return String(item?.descricao || item?.['descrição'] || item?.['Descricao'] || item?.['Descrição'] || '').trim() || 'Outro';
+  }
+  return TIPOS[tipo] || item?.tipo || 'Outro';
+}
 
 /* ================= NAVEGAÇÃO ================= */
-function renderTelaAtual(){
-  const tabAtiva=document.querySelector('.navbtn.active').dataset.tab;
-  if(tabAtiva==='manutencao'){ if(veiculoSel) renderDetalhe(); else renderManutTab(); }
-  if(tabAtiva==='dashboard') renderDashboard();
-  if(tabAtiva==='alertas') renderAlertas();
-  if(tabAtiva==='resolvidos') renderResolvidos();
-  if(tabAtiva==='cadastro') renderCadastro();
+function renderTelaAtual() {
+  const tabAtiva = document.querySelector('.navbtn.active').dataset.tab;
+  if (tabAtiva === 'manutencao') { 
+    if (veiculoSel) renderDetalhe(); 
+    else renderManutTab(); 
+  }
+  else if (tabAtiva === 'dashboard') renderDashboard();
+  else if (tabAtiva === 'alertas') renderAlertas();
+  else if (tabAtiva === 'cadastro') renderCadastro();
 }
 
-document.querySelectorAll('.navbtn').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    document.querySelectorAll('.navbtn').forEach(b=>b.classList.remove('active'));
-    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+document.querySelectorAll('.navbtn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.navbtn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
-
-    if(btn.dataset.tab==='manutencao') renderManutTab();
-    if(btn.dataset.tab==='dashboard') renderDashboard();
-    if(btn.dataset.tab==='alertas') renderAlertas();
-    if(btn.dataset.tab==='resolvidos') renderResolvidos();
-    if(btn.dataset.tab==='cadastro') renderCadastro();
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+    renderTelaAtual();
   });
 });
 
-async function atualizarManualmente(){
-  const btn=document.getElementById('btnAtualizar');
-  btn.disabled=true;
+async function atualizarManualmente() {
+  const btn = document.getElementById('btnAtualizar');
+  btn.disabled = true;
   await carregarDoServidor();
-  await sincronizarAlertas();
+  sincronizarAlertas(false); 
   renderTelaAtual();
-  toast('Dados atualizados.');
-  btn.disabled=false;
+  toast('Dados sincronizados da nuvem.');
+  btn.disabled = false;
 }
 
 /* ================= ABA 1: CADASTRO ================= */
-async function cadastrarVeiculo(){
-  const input=document.getElementById('inputPlaca');
-  const err=document.getElementById('errPlaca');
-  const btn=document.getElementById('btnCadastrarVeiculo');
-  err.textContent=''; input.classList.remove('err');
-  const placa=normalizarPlaca(input.value);
-  if(!placa){ err.textContent='Informe a placa do veículo.'; input.classList.add('err'); return; }
-  if(!placaValida(placa)){
-    err.textContent='Placa inválida. Use o formato antigo (ABC1234) ou Mercosul (ABC1D23).';
-    input.classList.add('err');
-    return;
-  }
-  if(db.veiculos.some(v=>v.placa===placa)){ err.textContent='Já existe um veículo cadastrado com esta placa.'; input.classList.add('err'); return; }
+function cadastrarVeiculo() {
+  const input = document.getElementById('inputPlaca');
+  const err = document.getElementById('errPlaca');
+  err.textContent = ''; 
+  input.classList.remove('err');
+  const placa = normalizarPlaca(input.value);
+  
+  if (!placa) { err.textContent = 'Informe a placa do veículo.'; input.classList.add('err'); return; }
+  if (!placaValida(placa)) { err.textContent = 'Placa inválida.'; input.classList.add('err'); return; }
+  if (db.veiculos.some(v => v.placa === placa)) { err.textContent = 'Veículo já cadastrado.'; input.classList.add('err'); return; }
 
-  btn.disabled=true;
-  btn.textContent='Cadastrando...';
-
-  // 1) Atualiza a tela imediatamente
   db.veiculos.push({ placa, kmAtual: 0 });
   garantirLimites(placa);
   salvarCache();
-  input.value='';
+  input.value = '';
   renderCadastro();
-  toast('Veículo '+placa+' cadastrado. Sincronizando com a planilha...');
+  toast('Sincronizando novo veículo...');
 
-  // 2) Envia para a planilha em segundo plano
-  apiPost('addVeiculo', { placa })
-    .then(()=> sincronizarAlertas())
-    .catch(e=>{
-      db.veiculos = db.veiculos.filter(v=>v.placa!==placa);
-      salvarCache();
-      renderCadastro();
-      toast('Erro ao salvar na planilha: '+e.message+' — o cadastro foi desfeito.', true);
-    })
-    .finally(()=>{
-      btn.disabled=false;
-      btn.textContent='Cadastrar';
-    });
+  execBackground(async () => {
+    await apiPost('addVeiculo', { placa });
+    sincronizarAlertas(true); 
+  }, 'Erro ao salvar na planilha');
 }
 
-function excluirVeiculo(placa){
-  document.getElementById('confirmTitle').textContent='Excluir veículo';
-  document.getElementById('confirmMsg').textContent='Tem certeza de que deseja excluir o veículo '+placa+'? Todo o histórico de manutenções também será removido.';
-  document.getElementById('confirmBtn').onclick=async ()=>{
-    try{
-      await apiPost('deleteVeiculo', { placa });
-      await carregarDoServidor();
-      closeModal('modalConfirm');
-      toast('Veículo '+placa+' excluído.');
-      renderCadastro();
-    }catch(e){
-      toast('Erro ao excluir: '+e.message, true);
-    }
+function excluirVeiculo(placa) {
+  document.getElementById('confirmTitle').textContent = 'Excluir veículo';
+  document.getElementById('confirmMsg').textContent = 'Tem certeza de que deseja excluir o veículo ' + placa + '?';
+  const btn = document.getElementById('confirmBtn');
+  
+  btn.onclick = () => {
+    closeModal('modalConfirm');
+    db.veiculos = db.veiculos.filter(v => v.placa !== placa);
+    db.manutencoes = db.manutencoes.filter(m => m.placa !== placa);
+    db.agendamentos = db.agendamentos.filter(a => a.placa !== placa);
+    db.alertas = db.alertas.filter(a => a.placa !== placa);
+    salvarCache();
+    renderCadastro();
+    toast('Excluindo veículo...');
+
+    execBackground(async () => { 
+      await apiPost('deleteVeiculo', { placa }); 
+    }, 'Erro ao excluir veículo');
   };
   openModal('modalConfirm');
 }
 
-function renderCadastro(){
-  const el=document.getElementById('listaCadastro');
-  if(db.veiculos.length===0){ el.innerHTML='<div class="empty">Nenhum veículo cadastrado ainda.</div>'; return; }
-  let html='<table><thead><tr><th>Placa</th><th>Km atual</th><th>Total gasto</th><th>Manutenções</th><th></th></tr></thead><tbody>';
-  db.veiculos.forEach(v=>{
-    const ms=db.manutencoes.filter(m=>m.placa===v.placa);
-    const total=ms.reduce((s,m)=>s+m.valor,0);
-    html+=`<tr><td><b>${v.placa}</b></td><td>${fmtKm(v.kmAtual)}</td><td>${fmtMoeda(total)}</td><td>${ms.length}</td><td><button class="btn danger small" onclick="excluirVeiculo('${v.placa}')">Excluir</button></td></tr>`;
+function renderCadastro() {
+  const el = document.getElementById('listaCadastro');
+  if (db.veiculos.length === 0) { 
+    el.innerHTML = '<div class="empty">Nenhum veículo cadastrado.</div>'; 
+    return; 
+  }
+  let html = '<table><thead><tr><th>Placa</th><th>Km atual</th><th>Total gasto</th><th>Manutenções</th><th>Ações</th></tr></thead><tbody>';
+  db.veiculos.forEach(v => {
+    const ms = db.manutencoes.filter(m => m.placa === v.placa);
+    const total = ms.reduce((s, m) => s + m.valor, 0);
+    html += `<tr><td><b>${v.placa}</b></td><td>${fmtKm(v.kmAtual)}</td><td>${fmtMoeda(total)}</td><td>${ms.length}</td><td><button class="btn danger small" onclick="excluirVeiculo('${v.placa}')">Excluir</button></td></tr>`;
   });
-  html+='</tbody></table>';
-  el.innerHTML=html;
+  html += '</tbody></table>';
+  el.innerHTML = html;
 }
 
 /* ================= ABA 2: MANUTENÇÃO ================= */
-let veiculoSel=null;
+let veiculoSel = null;
+let manutEditId = null;
+let resolverAlertaId = null; 
+let resolverAgendamentoId = null;
 
-function statusVeiculo(placa){
-  const al=db.alertas.filter(a=>a.placa===placa && a.status!=='resolvido');
-  if(al.some(a=>a.status==='ativo')) return 'atrasado';
-  if(al.some(a=>a.status==='analise')) return 'analise';
+function statusVeiculo(placa) {
+  const al = db.alertas.filter(a => a.placa === placa && a.status !== 'resolvido');
+  if (al.some(a => a.status === 'ativo')) return 'atrasado';
+  if (al.some(a => a.status === 'analise')) return 'analise';
   return 'ok';
 }
 
-function renderManutTab(){
-  veiculoSel=null;
-  document.getElementById('manutDetalheWrap').style.display='none';
-  document.getElementById('manutListaWrap').style.display='block';
-  const wrap=document.getElementById('chipsVeiculos');
-  if(db.veiculos.length===0){ wrap.innerHTML='<div class="empty">Nenhum veículo cadastrado. Vá até "Cadastro de Veículos".</div>'; return; }
-  wrap.innerHTML=db.veiculos.map(v=>{
-    const st=statusVeiculo(v.placa);
-    const cor= st==='atrasado' ? 'var(--danger)' : (st==='analise' ? 'var(--warning)' : 'var(--success)');
+function renderManutTab() {
+  veiculoSel = null;
+  document.getElementById('manutDetalheWrap').style.display = 'none';
+  document.getElementById('manutListaWrap').style.display = 'block';
+  const wrap = document.getElementById('chipsVeiculos');
+  if (db.veiculos.length === 0) { 
+    wrap.innerHTML = '<div class="empty">Nenhum veículo cadastrado.</div>'; 
+    return; 
+  }
+  wrap.innerHTML = db.veiculos.map(v => {
+    const st = statusVeiculo(v.placa);
+    const cor = st === 'atrasado' ? 'var(--danger)' : (st === 'analise' ? 'var(--warning)' : 'var(--success)');
     return `<span class="chip" onclick="selecionarVeiculo('${v.placa}')"><span class="dot" style="background:${cor}"></span>${v.placa}</span>`;
   }).join('');
 }
 
-async function selecionarVeiculo(placa){
-  veiculoSel=placa;
-  document.getElementById('manutListaWrap').style.display='none';
-  document.getElementById('manutDetalheWrap').style.display='block';
+function selecionarVeiculo(placa) {
+  veiculoSel = placa;
+  document.getElementById('manutListaWrap').style.display = 'none';
+  document.getElementById('manutDetalheWrap').style.display = 'block';
   renderDetalhe();
 }
 
-function ultimaManut(placa,tipo){
-  const l=db.manutencoes.filter(m=>m.placa===placa && m.tipo===tipo).sort((a,b)=>new Date(b.data)-new Date(a.data));
-  return l[0]||null;
+function ultimaManut(placa, tipo) { 
+  return db.manutencoes.filter(m => m.placa === placa && m.tipo === tipo).sort((a, b) => new Date(b.data) - new Date(a.data))[0] || null; 
 }
 
-function calcularLimite(placa,tipo){
+function calcularLimite(placa, tipo) {
   garantirLimites(placa);
-  const cfg=db.limites[placa][tipo];
-  if(!cfg) return null;
-  const ult=ultimaManut(placa,tipo);
-  if(!ult) return {temUltima:false, cfg};
-  const limiteKm = cfg.modo!=='meses' ? ult.km + Number(cfg.km) : null;
-  const limiteData = cfg.modo!=='km' ? addMeses(ult.data, Number(cfg.meses)) : null;
-  return { temUltima:true, ultima:ult, limiteKm, limiteData, cfg };
+  const cfg = db.limites[placa][tipo];
+  if (!cfg) return null;
+  const ult = ultimaManut(placa, tipo);
+  if (!ult) return { temUltima: false, cfg };
+  return { 
+    temUltima: true, 
+    ultima: ult, 
+    limiteKm: cfg.modo !== 'meses' ? ult.km + Number(cfg.km) : null, 
+    limiteData: cfg.modo !== 'km' ? addMeses(ult.data, Number(cfg.meses)) : null, 
+    cfg 
+  };
 }
 
-function verificarAlerta(placa,tipo){
-  const info=calcularLimite(placa,tipo);
-  if(!info) return null;
-  if(!info.temUltima) return { deveAlertar:true, semHistorico:true, info };
-  const veiculo=db.veiculos.find(v=>v.placa===placa);
-  const kmAtual=veiculo?veiculo.kmAtual:0;
-  const hoje=hojeISO();
-  let excedKm=false, excedTempo=false;
-  if(info.limiteKm!==null && kmAtual>=info.limiteKm) excedKm=true;
-  if(info.limiteData!==null && hoje>=info.limiteData) excedTempo=true;
-  let deveAlertar=false;
-  if(info.cfg.modo==='km') deveAlertar=excedKm;
-  else if(info.cfg.modo==='meses') deveAlertar=excedTempo;
-  else deveAlertar = excedKm || excedTempo;
+function verificarAlerta(placa, tipo) {
+  const info = calcularLimite(placa, tipo);
+  if (!info) return null;
+  if (!info.temUltima) return { deveAlertar: true, semHistorico: true, info };
+  
+  const v = db.veiculos.find(x => x.placa === placa);
+  const kmAtual = v ? v.kmAtual : 0;
+  const hoje = hojeISO();
+  
+  let excedKm = false, excedTempo = false;
+  if (info.limiteKm !== null && kmAtual >= info.limiteKm) excedKm = true;
+  if (info.limiteData !== null && hoje >= info.limiteData) excedTempo = true;
+  
+  let deveAlertar = info.cfg.modo === 'km' ? excedKm : (info.cfg.modo === 'meses' ? excedTempo : (excedKm || excedTempo));
   return { deveAlertar, excedKm, excedTempo, info, kmAtual, hoje };
 }
 
-async function sincronizarAlertas(){
-  try{
-    const paraAdicionar = [];
-    const idsParaRemover = [];
+function sincronizarAlertas(bgSync = true) {
+  const paraAdicionar = [], idsParaRemover = [];
+  for (const v of db.veiculos) {
+    for (const tipo of TIPOS_RASTREADOS) {
+      const check = verificarAlerta(v.placa, tipo);
+      const abertoExistente = db.alertas.find(a => a.placa === v.placa && a.tipo === tipo && a.status !== 'resolvido');
 
-    for(const v of db.veiculos){
-      for(const tipo of TIPOS_RASTREADOS){
-        const check=verificarAlerta(v.placa,tipo);
-        const abertoExistente = db.alertas.find(a=>a.placa===v.placa && a.tipo===tipo && a.status!=='resolvido');
-
-        if(check && check.deveAlertar){
-          if(!abertoExistente){
-            const resolvidos = db.alertas
-              .filter(a=>a.placa===v.placa && a.tipo===tipo && a.status==='resolvido' && a.dataResolucao)
-              .sort((a,b)=> new Date(b.dataResolucao) - new Date(a.dataResolucao));
-            const ultResolvido = resolvidos[0];
-            let deveRecriar = true;
-            if(ultResolvido){
-              deveRecriar = db.manutencoes.some(m=> m.placa===v.placa && m.tipo===tipo && m.data >= ultResolvido.dataResolucao);
-            }
-            if(deveRecriar){
-              paraAdicionar.push({ id:gerarId(), placa:v.placa, tipo, status:'ativo', dataAnalise:null, dataResolucao:null });
-            }
-          }
-        } else {
-          if(abertoExistente){
-            idsParaRemover.push(abertoExistente.id);
-          }
+      if (check && check.deveAlertar) {
+        if (!abertoExistente) {
+          const resolvidos = db.alertas.filter(a => a.placa === v.placa && a.tipo === tipo && a.status === 'resolvido' && a.dataResolucao).sort((a, b) => new Date(b.dataResolucao) - new Date(a.dataResolucao));
+          const ultResolvido = resolvidos[0];
+          let deveRecriar = true;
+          if (ultResolvido) deveRecriar = db.manutencoes.some(m => m.placa === v.placa && m.tipo === tipo && m.data >= ultResolvido.dataResolucao);
+          if (deveRecriar) paraAdicionar.push({ id: gerarId(), placa: v.placa, tipo, status: 'ativo', dataAnalise: null, dataResolucao: null });
         }
+      } else if (abertoExistente) {
+        idsParaRemover.push(abertoExistente.id);
       }
     }
+  }
 
-    if(paraAdicionar.length===0 && idsParaRemover.length===0) return;
+  if (paraAdicionar.length === 0 && idsParaRemover.length === 0) return;
 
-    try{
-      await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
-    }catch(e){
-      for(const id of idsParaRemover){ await apiPost('deleteAlerta', { id }); }
-      for(const a of paraAdicionar){ await apiPost('addAlerta', a); }
-    }
-    await carregarDoServidor(true);
-    renderTelaAtual();
-  }catch(e){
-    console.error('Falha ao sincronizar alertas:', e);
-    toast('Alertas não sincronizados: '+e.message, true);
+  db.alertas = db.alertas.filter(a => !idsParaRemover.includes(a.id));
+  db.alertas.push(...paraAdicionar);
+  salvarCache();
+  
+  if (bgSync) {
+    execBackground(async () => {
+      try { 
+        await apiPost('syncAlertas', { adicionar: paraAdicionar, remover: idsParaRemover });
+      } catch(e) {
+        for (const id of idsParaRemover) await apiPost('deleteAlerta', { id });
+        for (const a of paraAdicionar) await apiPost('addAlerta', a);
+      }
+    }, 'Falha oculta na sincronização de alertas');
   }
 }
 
-function renderDetalhe(){
-  const placa=veiculoSel;
-  const v=db.veiculos.find(x=>x.placa===placa);
-  if(!v) return;
-  garantirLimites(placa);
-  const ms=db.manutencoes.filter(m=>m.placa===placa).sort((a,b)=>new Date(b.data)-new Date(a.data));
-  const total=ms.reduce((s,m)=>s+m.valor,0);
-  const outros=ms.filter(m=>m.tipo==='outro');
-  const agends = db.agendamentos.filter(a=>a.placa===placa);
+function renderDetalhe() {
+  const placa = veiculoSel;
+  const v = db.veiculos.find(x => x.placa === placa);
+  if (!v) return;
   
+  garantirLimites(placa);
+  const ms = db.manutencoes.filter(m => m.placa === placa).sort((a, b) => new Date(b.data) - new Date(a.data));
+  const total = ms.reduce((s, m) => s + m.valor, 0);
+  const agends = db.agendamentos.filter(a => a.placa === placa);
+  const cfg = db.limites[placa];
 
-  function proximoLimiteTexto(tipo){
-    const info=calcularLimite(placa,tipo);
-    if(!info || !info.temUltima) return 'Sem histórico ainda';
-    if(info.limiteKm!==null){
+  const proximoLimiteTexto = (tipo) => {
+    const info = calcularLimite(placa, tipo);
+    if (!info || !info.temUltima) return 'Sem histórico';
+    if (info.limiteKm !== null) {
       const falta = info.limiteKm - v.kmAtual;
-      if(falta>=0) return fmtKm(info.limiteKm)+' (faltam '+fmtKm(falta)+')';
-      return fmtKm(info.limiteKm)+' (excedido há '+fmtKm(-falta)+')';
+      return falta >= 0 ? `${fmtKm(info.limiteKm)} (faltam ${fmtKm(falta)})` : `${fmtKm(info.limiteKm)} (excedido há ${fmtKm(-falta)})`;
     }
-    if(info.limiteData!==null){
-      return fmtData(info.limiteData);
-    }
-    return '-';
-  }
+    return info.limiteData !== null ? fmtData(info.limiteData) : '-';
+  };
 
-  const cfg=db.limites[placa];
-
-  const cardsTipos = TIPOS_RASTREADOS.map(t=>{
-    const ult=ultimaManut(placa,t);
-    return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult? fmtData(ult.data)+' · '+fmtKm(ult.km) : 'Sem registro'}</div></div>`;
+  const cardsTipos = TIPOS_RASTREADOS.map(t => {
+    const ult = ultimaManut(placa, t);
+    return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult ? fmtData(ult.data) + ' · ' + fmtKm(ult.km) : 'Sem registro'}</div></div>`;
   }).join('');
 
-  let html = `
+  document.getElementById('manutDetalheWrap').innerHTML = `
     <div class="back" onclick="renderManutTab()">← Voltar para lista de veículos</div>
     <div class="card">
       <div class="row" style="justify-content:space-between;">
-        <div>
-          <h2 style="margin-bottom:4px;">Veículo ${placa}</h2>
-          <div style="color:var(--dim);font-size:13px;">Quilometragem atual: <b style="color:var(--text)">${fmtKm(v.kmAtual)}</b></div>
-        </div>
+        <div><h2 style="margin-bottom:4px;">Veículo ${placa}</h2>
+        <div style="color:var(--dim);font-size:13px;">Km atual: <b style="color:var(--text)">${fmtKm(v.kmAtual)}</b></div></div>
         <div style="display:flex;gap:8px;">
-          <button class="btn secondary" onclick="abrirModalKm('${placa}')">Atualizar quilometragem</button>
+          <button class="btn secondary" onclick="abrirModalKm('${placa}')">Atualizar KM</button>
           <button class="btn" onclick="abrirModalManut('${placa}')">Marcar manutenção</button>
         </div>
       </div>
     </div>
-
     <div class="grid-cards">
       <div class="kpi"><div class="label">Total gasto</div><div class="value">${fmtMoeda(total)}</div></div>
       <div class="kpi"><div class="label">Nº manutenções</div><div class="value">${ms.length}</div></div>
       ${cardsTipos}
-      <div class="kpi"><div class="label">Outras manutenções</div><div class="value">${outros.length}</div></div>
     </div>
-
     <div class="card">
-      <h2>Configuração de alertas por tipo de manutenção</h2>
+      <h2>Configuração de alertas</h2>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
-        ${TIPOS_RASTREADOS.map(tipo=>`
+        ${TIPOS_RASTREADOS.map(tipo => `
           <div class="limitbox">
             <div style="font-weight:bold;margin-bottom:8px;">${TIPOS[tipo]}</div>
-            <div class="row">
-              <div class="field">
-                <label>Critério</label>
-                <select onchange="atualizarCfg('${placa}','${tipo}','modo',this.value)">
-                  <option value="km" ${cfg[tipo].modo==='km'?'selected':''}>Somente quilometragem</option>
-                  <option value="meses" ${cfg[tipo].modo==='meses'?'selected':''}>Somente tempo (meses)</option>
-                  <option value="km_e_meses" ${cfg[tipo].modo==='km_e_meses'?'selected':''}>Quilometragem ou tempo (o que vencer primeiro)</option>
-                </select>
-              </div>
-            </div>
+            <div class="row"><div class="field"><label>Critério</label>
+              <select onchange="atualizarCfg('${placa}','${tipo}','modo',this.value)">
+                <option value="km" ${cfg[tipo].modo === 'km' ? 'selected' : ''}>Somente km</option>
+                <option value="meses" ${cfg[tipo].modo === 'meses' ? 'selected' : ''}>Somente meses</option>
+                <option value="km_e_meses" ${cfg[tipo].modo === 'km_e_meses' ? 'selected' : ''}>O que vencer primeiro</option>
+              </select>
+            </div></div>
             <div class="row" style="margin-top:8px;">
-              <div class="field">
-                <label>A cada (km)</label>
-                <input type="number" min="0" value="${cfg[tipo].km}" onchange="atualizarCfg('${placa}','${tipo}','km',this.value)">
-              </div>
-              <div class="field">
-                <label>A cada (meses)</label>
-                <input type="number" min="0" value="${cfg[tipo].meses}" onchange="atualizarCfg('${placa}','${tipo}','meses',this.value)">
-              </div>
+              <div class="field"><label>A cada (km)</label><input type="number" min="0" value="${cfg[tipo].km}" onchange="atualizarCfg('${placa}','${tipo}','km',this.value)"></div>
+              <div class="field"><label>A cada (meses)</label><input type="number" min="0" value="${cfg[tipo].meses}" onchange="atualizarCfg('${placa}','${tipo}','meses',this.value)"></div>
             </div>
-            <div style="margin-top:8px;font-size:12px;color:var(--dim);">Próximo limite: <b style="color:var(--text)">${proximoLimiteTexto(tipo)}</b></div>
-          </div>
-        `).join('')}
+            <div style="margin-top:8px;font-size:12px;color:var(--dim);">Próximo: <b style="color:var(--text)">${proximoLimiteTexto(tipo)}</b></div>
+          </div>`).join('')}
       </div>
     </div>
-
-        <div class="card">
-      <h2>Histórico de manutenções</h2>
-      <table>
-        <thead><tr><th>Tipo</th><th>Data</th><th>Quilometragem</th><th>Valor</th><th>Observação</th><th>Ações</th></tr></thead>
-        <tbody>
-          ${ms.map(m=>`
-            <tr>
-              <td>${m.tipo==='outro' ? (m.descricao||'Outro') : (TIPOS[m.tipo]||m.tipo)}</td>
-              <td>${fmtData(m.data)}</td>
-              <td>${fmtKm(m.km)}</td>
-              <td>${fmtMoeda(m.valor)}</td>
-              <td>${m.observacao || '-'}</td>
-              <td>
-                <button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button>
-                <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
-    </div>
-        ${agends.length ? `
     <div class="card">
-      <h2>Manutenções agendadas</h2>
-      <table>
-        <thead><tr><th>Tipo</th><th>Data prevista</th><th>Valor previsto</th><th>Observação</th><th></th></tr></thead>
-        <tbody>
-          ${agends.map(g=>`
-            <tr>
-              <td>${g.tipo==='outro' ? (g.descricao||'Outro') : (TIPOS[g.tipo]||g.tipo)}</td>
-              <td>${g.dataPrevista ? fmtData(g.dataPrevista) : 'Sem data prevista'}</td>
-              <td>${g.valor ? fmtMoeda(g.valor) : '-'}</td>
-              <td>${g.observacao || '-'}</td>
-              <td>
-                <button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button>
-                <button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar</button>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+      <h2>Histórico</h2>
+      <table><thead><tr><th>Tipo</th><th>Data</th><th>Km</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
+      <tbody>${ms.map(m => `<tr><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td>${fmtKm(m.km)}</td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td>
+        <td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button></td></tr>`).join('')}</tbody></table>
+    </div>
+    ${agends.length ? `
+    <div class="card">
+      <h2>Agendadas</h2>
+      <table><thead><tr><th>Tipo</th><th>Previsão</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
+      <tbody>${agends.map(g => `<tr><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td>
+        <td>
+          <button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button> 
+          <button class="btn secondary small" onclick="editarAgendamento('${g.id}')">Editar</button> 
+          <button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar</button>
+        </td></tr>`).join('')}</tbody></table>
     </div>` : ''}
   `;
-
-  document.getElementById('manutDetalheWrap').innerHTML = html;
 }
 
-async function atualizarCfg(placa,tipo,campo,valor){
+function atualizarCfg(placa, tipo, campo, valor) {
   garantirLimites(placa);
-  if(campo==='modo') db.limites[placa][tipo].modo = valor;
+  if (campo === 'modo') db.limites[placa][tipo].modo = valor; 
   else db.limites[placa][tipo][campo] = Number(valor) || 0;
-
-  try{
-    await apiPost('updateLimite', {
-      placa, tipo,
-      modo: db.limites[placa][tipo].modo,
-      km: db.limites[placa][tipo].km,
-      meses: db.limites[placa][tipo].meses
-    });
-    salvarCache();
-    renderDetalhe();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao salvar configuração: '+e.message, true);
-  }
+  
+  salvarCache(); 
+  renderDetalhe(); 
+  sincronizarAlertas(false);
+  execBackground(async () => { 
+    await apiPost('updateLimite', { 
+      placa, 
+      tipo, 
+      modo: db.limites[placa][tipo].modo, 
+      km: db.limites[placa][tipo].km, 
+      meses: db.limites[placa][tipo].meses 
+    }); 
+  }, 'Erro configuração');
 }
 
-function abrirModalKm(){
-  const v=db.veiculos.find(v=>v.placa===veiculoSel);
-  document.getElementById('kmAtualInput').value = v.kmAtual>0 ? Number(v.kmAtual).toLocaleString('pt-BR') : '';
-  document.getElementById('errKmAtual').textContent='';
+function abrirModalKm(placa) {
+  veiculoSel = placa;
+  const v = db.veiculos.find(x => x.placa === placa);
+  document.getElementById('kmAtualInput').value = v.kmAtual > 0 ? Number(v.kmAtual).toLocaleString('pt-BR') : '';
+  document.getElementById('errKmAtual').textContent = '';
   openModal('modalKm');
 }
 
-async function salvarKmAtual(){
-  const input=document.getElementById('kmAtualInput');
-  const err=document.getElementById('errKmAtual');
-  const btn=document.getElementById('btnSalvarKm');
-  err.textContent=''; input.classList.remove('err');
-  const val=parseNumeroBR(input.value);
-  if(input.value.trim()===''||isNaN(val)||val<0){ err.textContent='Informe uma quilometragem válida (não negativa).'; input.classList.add('err'); return; }
-
-  btn.disabled=true;
-  try{
-    await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: val });
-    const v=db.veiculos.find(x=>x.placa===veiculoSel);
-    if(v) v.kmAtual=val;
-    salvarCache();
-    closeModal('modalKm');
-    toast('Quilometragem atualizada.');
-    renderDetalhe();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao atualizar quilometragem: '+e.message, true);
-  }finally{
-    btn.disabled=false;
+function salvarKmAtual() {
+  const input = document.getElementById('kmAtualInput');
+  const val = parseNumeroBR(input.value);
+  if (isNaN(val) || val < 0) { 
+    input.classList.add('err'); 
+    return; 
   }
+  
+  closeModal('modalKm');
+  const v = db.veiculos.find(x => x.placa === veiculoSel);
+  if (v) v.kmAtual = val;
+  salvarCache(); 
+  renderDetalhe(); 
+  sincronizarAlertas(false);
+  toast('Sincronizando KM...');
+
+  execBackground(async () => { 
+    await apiPost('updateKmVeiculo', { placa: veiculoSel, kmAtual: val }); 
+  }, 'Erro ao salvar KM');
 }
 
-let editandoId=null;
-
-function toggleOutro(){
-  const tipo=document.getElementById('mTipo').value;
-  document.getElementById('wrapOutro').style.display = tipo==='outro' ? 'block':'none';
+function onTipoChange() { 
+  document.getElementById('mDescricaoWrap').style.display = document.getElementById('mTipo').value === 'outro' ? 'block' : 'none'; 
 }
 
-function mostrarUltimaInfo(){
-  const tipo=document.getElementById('mTipo').value;
-  const box=document.getElementById('ultimaInfoBox');
-  if(!tipo || tipo==='outro'){ box.style.display='none'; return; }
-  const ult=ultimaManut(veiculoSel,tipo);
-  if(!ult){
-    box.style.display='block';
-    box.textContent = 'Este veículo ainda não possui registro de ' + TIPOS[tipo].toLowerCase() + '.';
-    return;
-  }
-  box.style.display='block';
-  box.textContent = 'Última ' + TIPOS[tipo].toLowerCase() + ': ' + fmtData(ult.data) + ' (com ' + fmtKm(ult.km) + ').';
+function onModoChange() { 
+  const ag = document.getElementById('mModo').value === 'agendar'; 
+  document.getElementById('mKmDataRow').style.display = ag ? 'none' : ''; 
+  document.getElementById('mDataPrevistaWrap').style.display = ag ? 'block' : 'none'; 
 }
 
-
-/* ============ BLOCO DE CORREÇÃO ============ */
-
-function voltarCadastro(){
-  renderManutTab();
-}
-
-function onTipoChange(){
-  const tipo = document.getElementById('mTipo').value;
-  document.getElementById('mDescricaoWrap').style.display = tipo==='outro' ? 'block' : 'none';
-}
-
-function onModoChange(){
-  const agendar = document.getElementById('mModo').value==='agendar';
-  document.getElementById('mKmDataRow').style.display = agendar ? 'none' : '';
-  document.getElementById('mDataPrevistaWrap').style.display = agendar ? 'block' : 'none';
-}
-
-function atualizarDescricoes(){
-  const dl = document.getElementById('descricoesList');
-  if(!dl) return;
-  const descricoes = new Set();
-  db.manutencoes.forEach(m=>{ if(m.tipo==='outro' && m.descricao) descricoes.add(String(m.descricao).trim()); });
-  db.agendamentos.forEach(a=>{ if(a.tipo==='outro' && a.descricao) descricoes.add(String(a.descricao).trim()); });
-  dl.innerHTML = [...descricoes].map(d=>`<option value="${String(d).replace(/"/g,'&quot;')}"></option>`).join('');
-}
-
-function abrirModalManut(placa, manut, modo){
-  veiculoSel = placa;
+function abrirModalManut(placa, manut, modo) {
+  veiculoSel = placa; 
   manutEditId = manut ? manut.id : null;
-  document.getElementById('manutTitle').textContent = (manut?'Editar':'Marcar')+' manutenção — '+placa;
-  const mModo = document.getElementById('mModo');
-  mModo.value = modo || 'realizada';
-  mModo.disabled = !!manut;
-  document.getElementById('mTipo').value = manut?manut.tipo:'';
-  document.getElementById('mDescricao').value = manut?(manut.descricao||''):'';
-  document.getElementById('mDescricaoWrap').style.display = manut && manut.tipo==='outro' ? 'block' : 'none';
-  document.getElementById('mKm').value = manut?manut.km:'';
-  document.getElementById('mData').value = manut?manut.data : hojeISO();
+  
+  document.getElementById('manutTitle').textContent = (manut ? 'Editar' : 'Marcar') + ' manutenção — ' + placa;
+  document.getElementById('mModo').value = modo || 'realizada'; 
+  document.getElementById('mModo').disabled = !!manut;
+  document.getElementById('mTipo').value = manut ? manut.tipo : ''; 
+  document.getElementById('mDescricao').value = manut ? (manut.descricao || '') : '';
+  document.getElementById('mKm').value = manut ? manut.km : ''; 
+  document.getElementById('mData').value = manut ? manut.data : hojeISO(); 
   document.getElementById('mDataPrevista').value = '';
-  document.getElementById('mValor').value = manut?manut.valor:'';
-  document.getElementById('mObs').value = manut?(manut.observacao||''):'';
-  errMTipo.textContent=''; errMKm.textContent=''; errMData.textContent='';
-  onModoChange();
-  atualizarDescricoes();
+  document.getElementById('mValor').value = manut ? manut.valor : ''; 
+  document.getElementById('mObs').value = manut ? (manut.observacao || '') : '';
+  onModoChange(); 
+  onTipoChange(); 
   openModal('modalManut');
 }
 
-function editarManutencao(id){
-  abrirModalManut(veiculoSel, db.manutencoes.find(m=>m.id===id));
+function resolverAgendamento(id) {
+  const ag = db.agendamentos.find(a => a.id === id); 
+  if (!ag) return;
+  const v = db.veiculos.find(x => x.placa === ag.placa);
+  
+  // Cria o registro no histórico automaticamente pegando os dados do agendamento
+  const registro = { 
+    id: gerarId(), 
+    placa: ag.placa, 
+    tipo: ag.tipo, 
+    descricao: String(ag.descricao || '').trim(), 
+    km: v ? v.kmAtual : 0, 
+    data: ag.dataPrevista || hojeISO(), 
+    valor: Number(ag.valor) || 0, 
+    observacao: ag.observacao || '' 
+  };
+  
+  db.manutencoes.push(registro);
+  db.agendamentos = db.agendamentos.filter(a => a.id !== ag.id);
+  
+  // Limpa o alerta associado na hora
+  const tipoA = ag.tipo === 'outro' ? (ag.descricao || 'outro') : ag.tipo;
+  const ex = db.alertas.find(a => a.placa === ag.placa && a.tipo === tipoA && a.status !== 'resolvido');
+  if (!ex) {
+    db.alertas.push({ id: gerarId(), placa: ag.placa, tipo: tipoA, status: 'resolvido', dataAnalise: null, dataResolucao: registro.data });
+  } else {
+    ex.status = 'resolvido';
+    ex.dataResolucao = registro.data;
+  }
+  
+  salvarCache(); 
+  renderTelaAtual(); 
+  sincronizarAlertas(false); 
+  toast('Resolvido e salvo no histórico! Sincronizando...');
+  
+  execBackground(async () => {
+    await apiPost('addManutencao', registro);
+    await apiPost('deleteAgendamento', { id: ag.id });
+    if(ex) await apiPost('updateAlerta', { id: ex.id, status: 'resolvido', dataAnalise: null, dataResolucao: registro.data });
+    sincronizarAlertas(true);
+  }, 'Erro ao resolver');
 }
 
-async function salvarManutencao(){
+function salvarManutencao() {
   const modo = document.getElementById('mModo').value;
   const tipo = document.getElementById('mTipo').value;
   const descricao = document.getElementById('mDescricao').value.trim();
   const kmInput = document.getElementById('mKm').value;
   const data = document.getElementById('mData').value;
   const dataPrevista = document.getElementById('mDataPrevista').value;
-  const valor = Number(document.getElementById('mValor').value)||0;
-  const obs = document.getElementById('mObs').value.trim();
-
-  let valido = true;
-  errMTipo.textContent=''; errMKm.textContent=''; errMData.textContent='';
-  if(!tipo){ errMTipo.textContent='Selecione o tipo de manutenção.'; valido=false; }
-  if(tipo==='outro' && !descricao){ errMTipo.textContent='Descreva a manutenção.'; valido=false; }
-  if(modo!=='agendar'){
-    if(kmInput && Number(kmInput)<=0){ errMKm.textContent='Informe uma quilometragem válida.'; valido=false; }
-    if(!data){ errMData.textContent='Informe a data da manutenção.'; valido=false; }
+  
+  if (!tipo || (tipo === 'outro' && !descricao) || (modo !== 'agendar' && (!data || (kmInput && Number(kmInput) <= 0)))) {
+    return toast('Preencha os campos corretamente', true);
   }
-  if(!valido) return;
 
-  const btn = document.getElementById('btnSalvarManut');
-  btn.disabled = true;
-  btn.textContent = 'Salvando...';
-
+  closeModal('modalManut');
   const placa = veiculoSel;
-  const v = db.veiculos.find(x=>x.placa===placa);
-  const normDesc = s => (s||'').trim().toLowerCase();
-
-  /* ---------- MODO AGENDAR ---------- */
-  if(modo==='agendar'){
-    const ag = { id:gerarId(), placa, tipo, descricao: tipo==='outro'?descricao:'', dataPrevista: dataPrevista||'', valor, observacao:obs, criadoEm:hojeISO() };
-    db.agendamentos.push(ag);
-    salvarCache();
-    closeModal('modalManut');
-    toast('Manutenção agendada para '+placa+'. Sincronizando...');
-    renderTelaAtual();
-    apiPost('addAgendamento', ag)
-      .catch(e=>{
-        db.agendamentos = db.agendamentos.filter(a=>a.id!==ag.id);
-        salvarCache();
-        renderTelaAtual();
-        toast('Erro ao salvar na planilha: '+e.message+' — o agendamento foi desfeito.', true);
-      })
-      .finally(()=>{ btn.disabled=false; btn.textContent='Salvar'; });
-    return;
-  }
-
-  /* ---------- MODO REALIZADA ---------- */
+  const v = db.veiculos.find(x => x.placa === placa);
   const km = kmInput ? Number(kmInput) : (v ? v.kmAtual : 0);
   const editando = !!manutEditId;
-  const registro = { id: editando ? manutEditId : gerarId(), placa, tipo, descricao: tipo==='outro'?descricao:'', km, data, valor, observacao:obs };
+  
+  if (modo === 'agendar') {
+    const agOriginal = editando ? db.agendamentos.find(a => a.id === manutEditId) : null;
+    const ag = { 
+      id: editando ? manutEditId : gerarId(), 
+      placa, 
+      tipo, 
+      descricao, 
+      dataPrevista, 
+      valor: Number(document.getElementById('mValor').value) || 0, 
+      observacao: document.getElementById('mObs').value.trim(), 
+      criadoEm: agOriginal ? agOriginal.criadoEm : hojeISO() 
+    };
+    
+    if (editando) {
+      const idx = db.agendamentos.findIndex(a => a.id === manutEditId);
+      if (idx >= 0) db.agendamentos[idx] = ag;
+    } else {
+      db.agendamentos.push(ag); 
+    }
+    
+    salvarCache(); 
+    renderTelaAtual(); 
+    toast(editando ? 'Agendamento atualizado. Sincronizando...' : 'Agendamento salvo. Sincronizando...');
+    
+    execBackground(async () => { 
+      try {
+        await apiPost(editando ? 'updateAgendamento' : 'addAgendamento', ag); 
+      } catch(e) {
+        if (editando) {
+          await apiPost('deleteAgendamento', { id: ag.id });
+          await apiPost('addAgendamento', ag);
+        } else throw e;
+      }
+    }, 'Erro ao salvar agendamento');
+    return;
+  }
 
-  // backups para desfazer em caso de erro
-  const manutAnterior = editando ? db.manutencoes.find(m=>m.id===manutEditId) : null;
-  const kmAnterior = v ? v.kmAtual : 0;
-  const agCumpridos = db.agendamentos.filter(a=>
-    a.placa===placa && a.tipo===tipo && (tipo!=='outro' || normDesc(a.descricao)===normDesc(descricao))
-  );
+  const registro = { 
+    id: editando ? manutEditId : gerarId(), 
+    placa, 
+    tipo, 
+    descricao: tipo === 'outro' ? descricao : '', 
+    km, 
+    data, 
+    valor: Number(document.getElementById('mValor').value) || 0, 
+    observacao: document.getElementById('mObs').value.trim() 
+  };
+  
+  const agCumpridos = db.agendamentos.filter(a => a.placa === placa && a.tipo === tipo && (tipo !== 'outro' || (a.descricao || '').trim().toLowerCase() === descricao.toLowerCase()));
 
-  // 1) aplica na hora na tela
-  if(editando){
-    const idx = db.manutencoes.findIndex(m=>m.id===manutEditId);
-    if(idx>=0) db.manutencoes[idx] = registro;
+  if (editando) { 
+    const idx = db.manutencoes.findIndex(m => m.id === manutEditId); 
+    if (idx >= 0) db.manutencoes[idx] = registro; 
   } else {
     db.manutencoes.push(registro);
   }
-  db.agendamentos = db.agendamentos.filter(a=>!agCumpridos.includes(a));
-  if(v && km > v.kmAtual) v.kmAtual = km;
-  salvarCache();
-  closeModal('modalManut');
-  toast('Manutenção salva. Sincronizando com a planilha...');
-  renderDetalhe();
-  sincronizarAlertas();
+  
+  db.agendamentos = db.agendamentos.filter(a => !agCumpridos.includes(a));
+  if (v && km > v.kmAtual) v.kmAtual = km;
+  
+  salvarCache(); 
+  renderDetalhe(); 
+  sincronizarAlertas(false); 
+  toast('Manutenção salva. Sincronizando...');
 
-  // 2) manda para a planilha em segundo plano
-  (async ()=>{
-    try{
-      await apiPost(editando ? 'updateManutencao' : 'addManutencao', registro);
-      for(const ag of agCumpridos){
-        await apiPost('deleteAgendamento', { id: ag.id });
-      }
-      if(v && km > kmAnterior){
-        await apiPost('updateKmVeiculo', { placa: v.placa, kmAtual: km });
-      }
-    }catch(e){
-      if(editando){
-        const idx = db.manutencoes.findIndex(m=>m.id===registro.id);
-        if(idx>=0 && manutAnterior) db.manutencoes[idx] = manutAnterior;
-      } else {
-        db.manutencoes = db.manutencoes.filter(m=>m.id!==registro.id);
-      }
-      db.agendamentos = db.agendamentos.concat(agCumpridos);
-      if(v) v.kmAtual = kmAnterior;
-      salvarCache();
-      renderDetalhe();
-      sincronizarAlertas();
-      toast('Erro ao salvar na planilha: '+e.message+' — a alteração foi desfeita.', true);
-    }finally{
-      btn.disabled=false;
-      btn.textContent='Salvar';
-    }
-  })();
+  execBackground(async () => {
+    await apiPost(editando ? 'updateManutencao' : 'addManutencao', registro);
+    for (const ag of agCumpridos) await apiPost('deleteAgendamento', { id: ag.id });
+    if (v && km > v.kmAtual) await apiPost('updateKmVeiculo', { placa, kmAtual: km });
+    sincronizarAlertas(true);
+  }, 'Erro ao salvar manutenção');
 }
 
-function excluirManutencao(id){
-  const m = db.manutencoes.find(x=>x.id===id);
-  document.getElementById('confirmTitle').textContent='Excluir manutenção';
-  document.getElementById('confirmMsg').textContent='Excluir esta manutenção do histórico?';
-  document.getElementById('confirmBtn').onclick=async ()=>{
-    try{
+function editarManutencao(id) { 
+  abrirModalManut(veiculoSel, db.manutencoes.find(m => m.id === id)); 
+}
+
+
+function editarAgendamento(id) {
+  const ag = db.agendamentos.find(a => a.id === id); 
+  if (!ag) return;
+  
+  veiculoSel = ag.placa; 
+  manutEditId = ag.id;
+  resolverAlertaId = null;
+  resolverAgendamentoId = null;
+  
+  document.getElementById('manutTitle').textContent = 'Editar agendamento — ' + ag.placa;
+  document.getElementById('mModo').value = 'agendar'; 
+  document.getElementById('mModo').disabled = true;
+  document.getElementById('mTipo').value = ag.tipo; 
+  document.getElementById('mDescricao').value = ag.descricao || '';
+  document.getElementById('mKm').value = ''; 
+  document.getElementById('mData').value = hojeISO(); 
+  document.getElementById('mDataPrevista').value = ag.dataPrevista || '';
+  document.getElementById('mValor').value = ag.valor || ''; 
+  document.getElementById('mObs').value = ag.observacao || '';
+  
+  onModoChange(); 
+  onTipoChange(); 
+  openModal('modalManut');
+}
+
+
+
+function excluirManutencao(id) {
+  document.getElementById('confirmTitle').textContent = 'Excluir manutenção';
+  document.getElementById('confirmMsg').textContent = 'Excluir do histórico?';
+  const btn = document.getElementById('confirmBtn');
+  btn.onclick = () => {
+    closeModal('modalConfirm');
+    const m = db.manutencoes.find(x => x.id === id);
+    db.manutencoes = db.manutencoes.filter(x => x.id !== id);
+    salvarCache(); 
+    renderDetalhe(); 
+    sincronizarAlertas(false); 
+    toast('Excluindo...');
+    execBackground(async () => {
       await apiPost('deleteManutencao', { id });
-      db.manutencoes = db.manutencoes.filter(x=>x.id!==id);
-      if(m){
-        const normDesc = s => (s||'').trim().toLowerCase();
-        const orfaos = db.alertas.filter(a =>
-          a.status==='resolvido' &&
-          a.placa===m.placa &&
-          a.dataResolucao===m.data &&
-          (a.tipo===m.tipo || (m.tipo==='outro' && normDesc(a.tipo)===normDesc(m.descricao)))
-        );
-        for(const a of orfaos){
-          await apiPost('deleteAlerta', { id: a.id });
-          db.alertas = db.alertas.filter(x=>x.id!==a.id);
-        }
+      if (m) {
+        const orfaos = db.alertas.filter(a => a.status === 'resolvido' && a.placa === m.placa && a.dataResolucao === m.data);
+        for (const a of orfaos) await apiPost('deleteAlerta', { id: a.id });
       }
-      salvarCache();
-      closeModal('modalConfirm');
-      toast('Manutenção excluída.');
-      renderDetalhe();
-      sincronizarAlertas();
-    }catch(e){
-      toast('Erro ao excluir manutenção: '+e.message, true);
-    }
-  };
+      sincronizarAlertas(true);
+    }, 'Erro ao excluir');
+  }; 
   openModal('modalConfirm');
 }
 
-async function resolverAgendamento(id){
-  const ag = db.agendamentos.find(a=>a.id===id);
-  if(!ag) return;
-  const v = db.veiculos.find(x=>x.placa===ag.placa);
-  try{
-    const registro = {
-      id: gerarId(),
-      placa: ag.placa,
-      tipo: ag.tipo,
-      descricao: ag.descricao || '',
-      km: v ? v.kmAtual : 0,
-      data: ag.dataPrevista || hojeISO(),
-      valor: Number(ag.valor)||0,
-      observacao: ag.observacao || ''
-    };
-    await apiPost('addManutencao', registro);
-    db.manutencoes.push(registro);
-
-    await apiPost('deleteAgendamento', { id: ag.id });
-    db.agendamentos = db.agendamentos.filter(a=>a.id!==ag.id);
-
-    const tipoAlerta = ag.tipo==='outro' ? (ag.descricao||'outro') : ag.tipo;
-    const existeAberto = db.alertas.some(a=>a.placa===ag.placa && a.tipo===tipoAlerta && a.status!=='resolvido');
-    if(!existeAberto){
-      const reg = { id: gerarId(), placa: ag.placa, tipo: tipoAlerta, status:'resolvido', dataAnalise:null, dataResolucao: registro.data };
-      await apiPost('addAlerta', reg);
-      db.alertas.push(reg);
-    }
-
-    salvarCache();
-    toast('Manutenção registrada no histórico de ' + ag.placa + '.');
-    renderTelaAtual();
-    sincronizarAlertas();
-  }catch(e){
-    toast('Erro ao resolver agendamento: '+e.message, true);
-  }
+function cancelarAgendamento(id) {
+  db.agendamentos = db.agendamentos.filter(a => a.id !== id); 
+  salvarCache(); 
+  renderTelaAtual(); 
+  toast('Cancelado...');
+  execBackground(async () => { await apiPost('deleteAgendamento', { id }); }, 'Erro ao cancelar');
 }
-
-async function cancelarAgendamento(id){
-  try{
-    await apiPost('deleteAgendamento', { id });
-    db.agendamentos = db.agendamentos.filter(a=>a.id!==id);
-    salvarCache();
-    toast('Agendamento cancelado.');
-    renderTelaAtual();
-  }catch(e){
-    toast('Erro ao cancelar agendamento: '+e.message, true);
-  }
-}
-
 
 /* ================= ABA 3: DASHBOARD ================= */
-function preencherSelectDashboard(){
-  const sel=document.getElementById('dashVeiculo');
-  const atual=sel.value;
-  sel.innerHTML='<option value="todos">Todos os veículos</option>' + db.veiculos.map(v=>`<option value="${v.placa}">${v.placa}</option>`).join('');
-  if([...sel.options].some(o=>o.value===atual)) sel.value=atual;
-}
-
-function filtrarPorPeriodo(lista,periodo){
-  if(periodo==='todos') return lista;
-  const hoje=new Date();
-  let limite;
-  if(periodo==='mes'){ limite=new Date(hoje.getFullYear(),hoje.getMonth(),1); }
-  else if(periodo==='3m'){ limite=new Date(hoje); limite.setMonth(limite.getMonth()-3); }
-  else if(periodo==='6m'){ limite=new Date(hoje); limite.setMonth(limite.getMonth()-6); }
-  else if(periodo==='12m'){ limite=new Date(hoje); limite.setMonth(limite.getMonth()-12); }
-  return lista.filter(m=> new Date(m.data+'T00:00:00') >= limite);
-}
-
-function renderDashboard(){
-  preencherSelectDashboard();
-  const veiculo=document.getElementById('dashVeiculo').value;
-  const periodo=document.getElementById('dashPeriodo').value;
-
-  let ms = veiculo==='todos' ? db.manutencoes.slice() : db.manutencoes.filter(m=>m.placa===veiculo);
-  ms = filtrarPorPeriodo(ms,periodo);
-
-  const total = ms.reduce((s,m)=>s+m.valor,0);
-  const qtd = ms.length;
-  const totalVeiculos = db.veiculos.length;
-
-  let msParaRanking = filtrarPorPeriodo(db.manutencoes, periodo);
-  const gastoPorVeiculo = {};
-  msParaRanking.forEach(m=>{ gastoPorVeiculo[m.placa]=(gastoPorVeiculo[m.placa]||0)+m.valor; });
-  let maiorPlaca='-', maiorValor=0;
-  Object.entries(gastoPorVeiculo).forEach(([p,v])=>{ if(v>maiorValor){maiorValor=v; maiorPlaca=p;} });
-
-  document.getElementById('dashKpis').innerHTML=`
-    <div class="kpi"><div class="label">Gasto total</div><div class="value">${fmtMoeda(total)}</div></div>
-    <div class="kpi"><div class="label">Nº de manutenções</div><div class="value">${qtd}</div></div>
-    <div class="kpi"><div class="label">Total de veículos</div><div class="value">${totalVeiculos}</div></div>
-    <div class="kpi"><div class="label">Veículo com maior gasto</div><div class="value" style="font-size:18px;">${maiorPlaca!=='-'?maiorPlaca+' — '+fmtMoeda(maiorValor):'-'}</div></div>
-  `;
-
-  const chartData = veiculo==='todos'
-    ? db.veiculos.map(v=>({placa:v.placa, valor: gastoPorVeiculo[v.placa]||0}))
-    : [{placa:veiculo, valor: total}];
-
-  const maxVal = Math.max(1, ...chartData.map(d=>d.valor));
-  document.getElementById('dashChart').innerHTML = chartData.length===0 ? '<div class="empty">Sem dados para exibir.</div>' :
-    chartData.map(d=>`
-      <div class="bar-row">
-        <div class="bar-label">${d.placa}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${(d.valor/maxVal*100).toFixed(1)}%">${fmtMoeda(d.valor)}</div></div>
-      </div>
-    `).join('');
-}
-
-/* ================= AGENDAMENTOS ================= */
-let agendPlaca = null;
-
-
-
-function toggleAgendOutro(){
-  const tipo = document.getElementById('aTipo').value;
-  document.getElementById('wrapAgendOutro').style.display = tipo==='outro' ? 'block' : 'none';
-}
-
-
-
-
-
-function montarCardAgendamento(g){
-  const nomeTipo = g.tipo==='outro' ? (g.descricao || 'Outro') : (TIPOS[g.tipo] || g.tipo);
-  return `
-    <div class="alertcard agendado">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center;">
-        <div style="font-size:16px;font-weight:bold;">${g.placa} — ${nomeTipo}</div>
-        <span class="badge yellow">📅 AGENDADO ${g.criadoEm ? '('+fmtData(g.criadoEm)+')' : ''}</span>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
-        <div>Data prevista: <b style="color:var(--text)">${g.dataPrevista ? fmtData(g.dataPrevista) : 'Sem data prevista'}</b></div>
-        <div>Valor previsto: <b style="color:var(--text)">${g.valor ? fmtMoeda(g.valor) : '-'}</b></div>
-        <div>Observação: <b style="color:var(--text)">${g.observacao || '-'}</b></div>
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;">
-        <button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button>
-        <button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar agendamento</button>
-      </div>
-    </div>
-  `;
-}
-
-/* ================= ABA 4: ALERTAS ================= */
-async function marcarResolvido(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'resolvido', dataAnalise:null, dataResolucao: hojeISO() });
-    await carregarDoServidor(true);
-    toast('Alerta marcado como resolvido e movido para o histórico.');
-    renderAlertas();
-  }catch(e){
-    toast('Erro ao resolver alerta: '+e.message, true);
+function renderDashboard() {
+  const sel = document.getElementById('dashVeiculo'), atual = sel ? sel.value : 'todos';
+  sel.innerHTML = '<option value="todos">Todos os veículos</option>' + db.veiculos.map(v => `<option value="${v.placa}">${v.placa}</option>`).join('');
+  if ([...sel.options].some(o => o.value === atual)) sel.value = atual;
+  
+  const veiculo = sel.value, periodo = document.getElementById('dashPeriodo').value;
+  let ms = veiculo === 'todos' ? db.manutencoes.slice() : db.manutencoes.filter(m => m.placa === veiculo);
+  
+  if (periodo !== 'todos') {
+    const limite = new Date(); 
+    limite.setMonth(limite.getMonth() - (periodo === 'mes' ? 0 : parseInt(periodo)));
+    if (periodo === 'mes') limite.setDate(1);
+    ms = ms.filter(m => new Date(m.data + 'T00:00:00') >= limite);
   }
-}
-async function marcarAnalise(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'analise', dataAnalise: hojeISO(), dataResolucao:null });
-    await carregarDoServidor(true);
-    renderAlertas();
-  }catch(e){
-    toast('Erro ao atualizar alerta: '+e.message, true);
-  }
-}
-async function reabrirAlerta(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor(true);
-    renderAlertas();
-  }catch(e){
-    toast('Erro ao reabrir alerta: '+e.message, true);
-  }
-}
-async function reativarResolvido(id){
-  try{
-    await apiPost('updateAlerta', { id, status:'ativo', dataAnalise:null, dataResolucao:null });
-    await carregarDoServidor(true);
-    renderResolvidos();
-  }catch(e){
-    toast('Erro ao reabrir alerta: '+e.message, true);
-  }
+
+  const gastoPorVeiculo = {}; 
+  ms.forEach(m => { gastoPorVeiculo[m.placa] = (gastoPorVeiculo[m.placa] || 0) + m.valor; });
+  let maiorPlaca = '-', maiorValor = 0; 
+  Object.entries(gastoPorVeiculo).forEach(([p, v]) => { if (v > maiorValor) { maiorValor = v; maiorPlaca = p; } });
+
+  document.getElementById('dashKpis').innerHTML = `
+    <div class="kpi"><div class="label">Gasto total</div><div class="value">${fmtMoeda(ms.reduce((s, m) => s + m.valor, 0))}</div></div>
+    <div class="kpi"><div class="label">Manutenções</div><div class="value">${ms.length}</div></div>
+    <div class="kpi"><div class="label">Veículos</div><div class="value">${db.veiculos.length}</div></div>
+    <div class="kpi"><div class="label">Maior gasto</div><div class="value" style="font-size:18px;">${maiorPlaca !== '-' ? maiorPlaca + ' — ' + fmtMoeda(maiorValor) : '-'}</div></div>`;
+
+  const chartData = veiculo === 'todos' ? db.veiculos.map(v => ({ placa: v.placa, valor: gastoPorVeiculo[v.placa] || 0 })) : [{ placa: veiculo, valor: ms.reduce((s, m) => s + m.valor, 0) }];
+  const maxVal = Math.max(1, ...chartData.map(d => d.valor));
+  document.getElementById('dashChart').innerHTML = chartData.map(d => `
+    <div class="bar-row"><div class="bar-label">${d.placa}</div><div class="bar-track"><div class="bar-fill" style="width:${(d.valor / maxVal * 100).toFixed(1)}%">${fmtMoeda(d.valor)}</div></div></div>
+  `).join('');
 }
 
-function excluirRegistroResolvido(id){
-  document.getElementById('confirmTitle').textContent='Excluir registro';
-  document.getElementById('confirmMsg').textContent='Excluir este registro do histórico de resolvidos? (Não afeta o histórico de manutenções do veículo.)';
-  document.getElementById('confirmBtn').onclick=async ()=>{
-    try{
-      await apiPost('deleteAlerta', { id });
-      db.alertas = db.alertas.filter(a=>a.id!==id);
-      salvarCache();
-      closeModal('modalConfirm');
-      toast('Registro excluído.');
-      renderResolvidos();
-    }catch(e){
-      toast('Erro ao excluir registro: '+e.message, true);
-    }
-  };
+/* ================= ABA 4: ALERTAS OTIMIZADOS ================= */
+function marcarResolvido(id) { 
+  alterarAlerta(id, 'resolvido', true); 
+}
+
+function alterarAlerta(id, status, isResolucao = false) {
+  const a = db.alertas.find(x => x.id === id); 
+  if (!a) return;
+  a.status = status; 
+  a.dataAnalise = status === 'analise' ? hojeISO() : null; 
+  a.dataResolucao = isResolucao ? hojeISO() : null;
+  salvarCache(); 
+  renderTelaAtual();
+  execBackground(async () => { await apiPost('updateAlerta', { id, status, dataAnalise: a.dataAnalise, dataResolucao: a.dataResolucao }); }, 'Erro no alerta');
+}
+
+function marcarAnalise(id) { alterarAlerta(id, 'analise'); }
+function reabrirAlerta(id) { alterarAlerta(id, 'ativo'); }
+function reativarResolvido(id) { alterarAlerta(id, 'ativo'); }
+
+function excluirRegistroResolvido(id) {
+  document.getElementById('confirmTitle').textContent = 'Excluir registro';
+  document.getElementById('confirmMsg').textContent = 'Excluir histórico de resolvidos?';
+  const btn = document.getElementById('confirmBtn');
+  btn.onclick = () => {
+    closeModal('modalConfirm'); 
+    db.alertas = db.alertas.filter(a => a.id !== id); 
+    salvarCache(); 
+    renderTelaAtual();
+    execBackground(async () => { await apiPost('deleteAlerta', { id }); }, 'Erro exclusão');
+  }; 
   openModal('modalConfirm');
 }
 
-function montarCardAlerta(a, contexto){
-  const info=calcularLimite(a.placa,a.tipo);
-  const v=db.veiculos.find(x=>x.placa===a.placa);
-  const kmAtual=v?v.kmAtual:0;
-  const hoje=hojeISO();
-  const nomeTipo = TIPOS[a.tipo] || a.tipo;
-  const semHistorico = !info || !info.temUltima;
+function irParaVeiculo(placa) { 
+  document.querySelector('.navbtn[data-tab="manutencao"]').click(); 
+  selecionarVeiculo(placa); 
+}
 
-    let motivo='';
-  if(a.status==='resolvido'){
-    motivo='Manutenção realizada' + (a.dataResolucao ? ' em '+fmtData(a.dataResolucao) : '') + '.';
-  } else if(semHistorico){
-    motivo='ALERTA: veículo sem registro de '+nomeTipo.toLowerCase()+'. Veículo deve ser inspecionado.';
-  } else {
-    const excedKm = info.limiteKm!==null && kmAtual>=info.limiteKm;
-    const excedTempo = info.limiteData!==null && hoje>=info.limiteData;
-    if(excedKm && excedTempo) motivo='ALERTA: quilometragem e prazo excedidos. Veículo deve ser inspecionado.';
-    else if(excedKm) motivo='ALERTA: quilometragem excedida. Veículo deve ser inspecionado.';
-    else if(excedTempo) motivo='ALERTA: prazo excedido. Veículo deve ser inspecionado.';
-    else motivo='Situação regularizada.';
+const estadoAccordions = { atrasado: true, pendente: true, andamento: true, resolvido: false };
+
+function toggleSecaoAlerta(header, secaoId) {
+  const corpo = header.nextElementSibling;
+  const seta = header.querySelector('.alert-secao-seta');
+  const estavaAberto = corpo.style.display !== 'none';
+  
+  corpo.style.display = estavaAberto ? 'none' : 'block'; 
+  seta.textContent = estavaAberto ? '▸' : '▾';
+  estadoAccordions[secaoId] = !estavaAberto; 
+}
+
+function grupoAlerta(a) {
+  if (a.status === 'resolvido') return 'resolvido'; 
+  if (a.status === 'analise') return 'andamento';
+  const ag = db.agendamentos.find(ag => ag.placa === a.placa && ag.tipo === a.tipo);
+  return (!ag || (ag.dataPrevista && ag.dataPrevista < hojeLocal())) ? 'atrasado' : 'pendente';
+}
+
+function dataCriacaoAlertaTs(a) {
+  const p = String(a.id || '').split('_');
+  if (p.length >= 2) { 
+    const ts = parseInt(p[1], 36); 
+    if (!isNaN(ts)) return ts; 
   }
+  return Date.now();
+}
 
-  let badgeStatus='';
-  let classeExtra='';
-  if(a.status==='ativo'){ badgeStatus='<span class="badge red">🔴 ATRASADO</span>'; }
-  else if(a.status==='analise'){ badgeStatus=`<span class="badge yellow">🟡 EM ANÁLISE ${a.dataAnalise? '('+fmtData(a.dataAnalise)+')' : ''}</span>`; classeExtra='analise'; }
-  else if(a.status==='resolvido'){ badgeStatus=`<span class="badge green">✅ RESOLVIDO ${a.dataResolucao? '('+fmtData(a.dataResolucao)+')' : ''}</span>`; classeExtra='resolvido'; }
+function montarCardAlerta(a) {
+  const v = db.veiculos.find(x => x.placa === a.placa), km = v ? fmtKm(v.kmAtual) : '-', grp = grupoAlerta(a);
+  let btn = grp === 'resolvido' ? `<button class="btn small secondary" onclick="reativarResolvido('${a.id}')">Reabrir</button><button class="btn small danger" onclick="excluirRegistroResolvido('${a.id}')">Excluir</button>` :
+            grp === 'andamento' ? `<button class="btn small" onclick="marcarResolvido('${a.id}')">Resolvido</button><button class="btn small secondary" onclick="reabrirAlerta('${a.id}')">Voltar</button>` :
+            `<button class="btn small secondary" onclick="marcarAnalise('${a.id}')">Em andamento</button><button class="btn small" onclick="marcarResolvido('${a.id}')">Resolvido</button>`;
 
-  let acoes='';
-  if(contexto==='ativos'){
-    acoes = a.status==='ativo'
-      ? `<button class="btn success small" onclick="marcarResolvido('${a.id}')">Resolvido</button>
-         <button class="btn warn small" onclick="marcarAnalise('${a.id}')">Em análise</button>`
-      : `<button class="btn success small" onclick="marcarResolvido('${a.id}')">Resolvido</button>
-         <button class="btn secondary small" onclick="reabrirAlerta('${a.id}')">Reabrir</button>`;
-    } else {
-    acoes = `<button class="btn secondary small" onclick="reativarResolvido('${a.id}')">Reabrir alerta</button>
-             <button class="btn danger small" onclick="excluirRegistroResolvido('${a.id}')">Excluir registro</button>`;
-  }
+  return `<div class="alert-card ${grp}">
+    <div class="alert-info"><div class="alert-title">${a.placa} — ${nomeTipo(a.tipo)}</div><div class="alert-sub">Km: ${km}</div></div>
+    <div class="alert-actions">${btn}</div>
+  </div>`;
+}
 
-  const detalhes = semHistorico ? `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
-        <div>Última manutenção: <b style="color:var(--text)">Sem registro</b></div>
-        <div>Km atual do veículo: <b style="color:var(--text)">${fmtKm(kmAtual)}</b></div>
-      </div>`
-    : `
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px;font-size:13px;color:var(--dim);margin:10px 0;">
-        <div>Última manutenção: <b style="color:var(--text)">${fmtData(info.ultima.data)}</b></div>
-        <div>Km da última manutenção: <b style="color:var(--text)">${fmtKm(info.ultima.km)}</b></div>
-        <div>Km atual do veículo: <b style="color:var(--text)">${fmtKm(kmAtual)}</b></div>
-        ${info.limiteKm!==null ? `<div>Limite de km: <b style="color:var(--text)">${fmtKm(info.limiteKm)}</b></div>` : ''}
-        ${info.limiteData!==null ? `<div>Limite de prazo: <b style="color:var(--text)">${fmtData(info.limiteData)}</b></div>` : ''}
-      </div>`;
-
-  return `
-    <div class="alertcard ${classeExtra}">
-      <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;align-items:center;">
-        <div style="font-size:16px;font-weight:bold;">${a.placa} — ${nomeTipo}</div>
-        ${badgeStatus}
-      </div>
-      ${detalhes}
-      <div class="alertmsg">${motivo}</div>
-      <div style="display:flex;gap:8px;">${acoes}</div>
+function montarCardAgAtrasado(ag) {
+  return `<div class="alert-card atrasado">
+    <div class="alert-info">
+      <div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div>
+      <div class="alert-sub" style="color:var(--danger); font-weight:bold;">⚠️ Agendamento Atrasado: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div>
     </div>
-  `;
+    <div class="alert-actions">
+      <button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button>
+      <button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button>
+      <button class="btn small secondary" onclick="irParaVeiculo('${ag.placa}')">Ver</button>
+    </div>
+  </div>`;
 }
 
-function renderAlertas(){
-  const el = document.getElementById('alertasLista');
-  const badge = document.getElementById('alertBadge');
-  const ativosLista = db.alertas.filter(a=>a.status==='ativo' || a.status==='analise');
-  const ativos = db.alertas.filter(a=>a.status==='ativo').length;
-  badge.textContent = ativos>0 ? '('+ativos+')' : '';
-
-  const agends = db.agendamentos
-    .filter(g=> db.veiculos.some(v=>v.placa===g.placa))
-    .sort((a,b)=>{
-      if(a.dataPrevista && b.dataPrevista) return a.dataPrevista.localeCompare(b.dataPrevista);
-      if(a.dataPrevista) return -1;
-      if(b.dataPrevista) return 1;
-      return a.placa.localeCompare(b.placa);
-    });
-
-  if(ativosLista.length===0 && agends.length===0){
-    el.innerHTML = '<div class="empty">Nenhum alerta no momento. Todos os veículos estão em dia. ✅</div>';
-    return;
-  }
-
-  let html = ativosLista.slice().sort((a,b)=> a.status==='ativo' ? -1 : 1).map(a=>montarCardAlerta(a,'ativos')).join('');
-  if(agends.length>0){
-    html += '<div style="color:var(--dim);font-size:13px;font-weight:bold;margin:16px 0 8px;">📅 MANUTENÇÕES AGENDADAS</div>';
-    html += agends.map(montarCardAgendamento).join('');
-  }
-  el.innerHTML = html;
+function montarCardAgPendente(ag) {
+  return `<div class="alert-card pendente">
+    <div class="alert-info">
+      <div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div>
+      <div class="alert-sub">Agendado para: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div>
+    </div>
+    <div class="alert-actions">
+      <button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button>
+      <button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button>
+      <button class="btn small secondary" onclick="irParaVeiculo('${ag.placa}')">Ver</button>
+    </div>
+  </div>`;
 }
 
-function renderResolvidos(){
-  const el=document.getElementById('resolvidosLista');
-  const resolvidos = db.alertas.filter(a=>a.status==='resolvido').sort((a,b)=> new Date(b.dataResolucao||0) - new Date(a.dataResolucao||0));
+function renderAlertas() {
+  const s = document.getElementById('tab-alertas'); 
+  if (!s) return; 
 
-  if(resolvidos.length===0){
-    el.innerHTML='<div class="empty">Nenhum alerta resolvido ainda.</div>';
-    return;
+  let filtroInput = document.getElementById('filtroPlacaAlerta');
+  const card = s.querySelector('.card');
+  if (!filtroInput && card) {
+    filtroInput = document.createElement('input');
+    filtroInput.type = 'text';
+    filtroInput.id = 'filtroPlacaAlerta';
+    filtroInput.placeholder = '🔎 Filtrar por placa... (Ex: ABC1234)';
+    filtroInput.style.marginBottom = '16px';
+    filtroInput.oninput = renderAlertas;
+    
+    const listaAtual = card.querySelector('#alertasLista');
+    if (listaAtual) {
+      card.insertBefore(filtroInput, listaAtual);
+    } else {
+      card.appendChild(filtroInput);
+    }
   }
-  el.innerHTML = resolvidos.map(a=>montarCardAlerta(a,'resolvidos')).join('');
+
+  let c = document.getElementById('alertasLista');
+  if (!c && card) { 
+    c = document.createElement('div'); 
+    c.id = 'alertasLista'; 
+    card.appendChild(c); 
+  }
+  
+  const termo = filtroInput ? filtroInput.value.trim().toUpperCase() : '';
+  let baseAgs = db.agendamentos.filter(ag => !db.alertas.some(a => a.placa === ag.placa && a.tipo === ag.tipo && a.status !== 'resolvido'));
+  let baseAlertas = db.alertas;
+
+  if (termo) {
+    baseAgs = baseAgs.filter(ag => ag.placa.includes(termo));
+    baseAlertas = baseAlertas.filter(a => a.placa.includes(termo));
+  }
+
+  if (baseAlertas.length === 0 && baseAgs.length === 0) { 
+    c.innerHTML = '<p class="empty">Nenhum alerta encontrado. ✅</p>'; 
+    return; 
+  }
+
+  const g = { atrasado: [], pendente: [], andamento: [], resolvido: [] };
+  baseAlertas.forEach(a => g[grupoAlerta(a)].push(a));
+  g.resolvido.sort((a, b) => new Date(b.dataResolucao || 0) - new Date(a.dataResolucao || 0)); 
+
+  const hoje = hojeLocal();
+  const agsAtrasados = baseAgs.filter(ag => ag.dataPrevista && ag.dataPrevista < hoje);
+  const agsPendentes = baseAgs.filter(ag => !(ag.dataPrevista && ag.dataPrevista < hoje));
+  
+  const listaAtrasados = [
+    ...g.atrasado.map(a => ({ html: montarCardAlerta(a), ts: dataCriacaoAlertaTs(a) })),
+    ...agsAtrasados.map(ag => ({ html: montarCardAgAtrasado(ag), ts: new Date(ag.dataPrevista + 'T00:00:00').getTime() }))
+  ];
+  listaAtrasados.sort((a, b) => a.ts - b.ts);
+  
+  const sec = (grp, tit, html, num) => {
+    if(num === 0) return '';
+    const exp = estadoAccordions[grp];
+    return `<div class="alert-secao ${grp}">
+              <div class="alert-secao-header" onclick="toggleSecaoAlerta(this, '${grp}')">
+                <span>${tit}</span>
+                <span class="alert-secao-count">${num}</span>
+                <span class="alert-secao-seta">${exp ? '▾' : '▸'}</span>
+              </div>
+              <div class="alert-secao-corpo" style="display:${exp ? 'block' : 'none'}">${html}</div>
+            </div>`;
+  };
+
+  const htmlAtrasados = listaAtrasados.map(item => item.html).join('');
+  const htmlPendentes = g.pendente.map(montarCardAlerta).join('') + agsPendentes.map(montarCardAgPendente).join('');
+
+  c.innerHTML = sec('atrasado', '🔴 Atrasado', htmlAtrasados, listaAtrasados.length) +
+                sec('pendente', '🟡 Pendente', htmlPendentes, g.pendente.length + agsPendentes.length) +
+                sec('andamento', '🟠 Em andamento', g.andamento.map(montarCardAlerta).join(''), g.andamento.length) +
+                sec('resolvido', '🟢 Resolvido', g.resolvido.map(montarCardAlerta).join(''), g.resolvido.length);
 }
 
 /* ================= INICIALIZAÇÃO ================= */
-function atualizarRelogio(){
-  const d=new Date();
-  document.getElementById('dateNow').textContent = d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
-}
-
-async function iniciar(){
-  atualizarRelogio();
-  setInterval(atualizarRelogio,60000);
-  if(carregarCache()){
-    renderCadastro();
-    carregarDoServidor(true).then(()=>{ sincronizarAlertas(); });
-  } else {
-    await carregarDoServidor();
-    await sincronizarAlertas();
-    renderCadastro();
+async function iniciar() {
+  setInterval(() => { document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }, 60000);
+  document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (carregarCache()) { 
+    renderCadastro(); 
+    carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
+  } else { 
+    await carregarDoServidor(); 
+    sincronizarAlertas(false); 
+    renderCadastro(); 
   }
 }
-
 iniciar();
