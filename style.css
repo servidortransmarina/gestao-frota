@@ -169,8 +169,8 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 
 .bar-row { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
 .bar-label { min-width: 90px; font-size: 13px; font-weight: 600; }
-.bar-track { flex: 1; background: #f3f4f6; border-radius: 6px; height: 22px; overflow: hidden; border: 1px solid var(--border); inset: 0; }
-.bar-fill { background: var(--primary); height: 100%; color: #fff; font-size: 11px; padding-left: 8px; line-height: 22px; font-weight: 600; white-space: nowrap; transition: width 0.5s ease; }
+.bar-track { flex: 1; background: #f3f4f6; border-radius: 6px; height: 26px; overflow: hidden; border: 1px solid var(--border); inset: 0; }
+.bar-fill { background: #05c53e; height: 100%; color: #000000; font-size: 14px; padding-left: 8px; line-height: 26px; font-weight: 600; white-space: nowrap; transition: width 0.5s ease; }
 
 .loading-overlay { display: none; position: fixed; inset: 0; background: rgba(255, 255, 255, 0.8); align-items: center; justify-content: center; z-index: 3000; font-size: 16px; color: var(--text); font-weight: 600; backdrop-filter: blur(2px); }
 .loading-overlay.show { display: flex; }
