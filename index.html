@@ -14,7 +14,9 @@
   </div>
   <div class="header-right">
     <span id="dateNow"></span>
-    <button id="btnAtualizar" class="btn" onclick="atualizarManualmente()">🔄 Atualizar dados</button>
+    <span id="nomeUsuarioTopo" style="margin-left:15px; font-weight:600; color:var(--primary);"></span>
+    <button id="btnSair" class="btn secondary small" onclick="fazerLogout()" style="display:none; margin-left:10px;">Sair</button>
+    <button id="btnAtualizar" class="btn" onclick="atualizarManualmente()" style="margin-left:15px;">🔄 Atualizar dados</button>
   </div>
 </header>
 
@@ -23,11 +25,9 @@
   <button class="navbtn" data-tab="manutencao">Manutenção</button>
   <button class="navbtn" data-tab="dashboard">Dashboard</button>
   <button class="navbtn" data-tab="alertas">Alertas <span id="alertBadge"></span></button>
-  
 </nav>
 
 <main>
-
 <section id="tab-cadastro" class="tab active">
   <div class="card">
     <h2>Cadastrar novo veículo</h2>
@@ -88,11 +88,49 @@
     <div id="alertasLista"></div>
   </div>
 </section>
-
-
-
 </main>
 
+<!-- TELA DE LOGIN (BLOQUEIA O SITE) -->
+<div class="overlay login-overlay" id="telaLoginOverlay">
+  <div class="caixa-login">
+    <h2 style="margin-bottom: 20px; text-align:center;">🔐 Acesso Restrito</h2>
+    
+    <!-- BLOCO DE LOGIN -->
+    <div id="formLogin">
+      <div class="field" style="margin-bottom: 15px; text-align: left;">
+        <input type="text" id="inputUsuario" placeholder="Usuário (ex: JoaoPaulo)">
+      </div>
+      <div class="field" style="margin-bottom: 20px; text-align: left;">
+        <input type="password" id="inputSenha" placeholder="Senha">
+      </div>
+      <button class="btn" id="btnLogin" onclick="fazerLogin()" style="width: 100%; font-size:15px; padding:12px;">Entrar no Sistema</button>
+      <p style="margin-top: 15px; font-size: 13px; text-align: center;">
+        <a href="#" onclick="mostrarCadastro()" style="color: var(--primary); text-decoration: none; font-weight: bold;">Primeiro acesso? Solicite uma conta</a>
+      </p>
+    </div>
+
+    <!-- BLOCO DE CADASTRO (Escondido por padrão) -->
+    <div id="formCadastro" style="display: none;">
+      <div class="field" style="margin-bottom: 15px; text-align: left;">
+        <input type="text" id="cadNome" placeholder="Seu Nome e Sobrenome">
+      </div>
+      <div class="field" style="margin-bottom: 15px; text-align: left;">
+        <input type="text" id="cadUsuario" placeholder="Escolha um Usuário (ex: LuisArtur)">
+      </div>
+      <div class="field" style="margin-bottom: 20px; text-align: left;">
+        <input type="password" id="cadSenha" placeholder="Crie uma Senha">
+      </div>
+      <button class="btn" id="btnCadastrar" onclick="solicitarAcesso()" style="width: 100%; font-size:15px; padding:12px; background-color: var(--warning);">Solicitar Aprovação</button>
+      <p style="margin-top: 15px; font-size: 13px; text-align: center;">
+        <a href="#" onclick="mostrarLogin()" style="color: var(--dim); text-decoration: none;">← Voltar para o Login</a>
+      </p>
+    </div>
+
+    <p id="mensagemErro" class="errmsg" style="display:none; text-align: center; margin-top: 15px;"></p>
+  </div>
+</div>
+
+<!-- MODAIS GERAIS -->
 <div class="overlay" id="modalConfirm">
   <div class="modal">
     <h3 id="confirmTitle">Confirmar</h3>
@@ -176,8 +214,6 @@
     </div>
   </div>
 </div>
-
-
 
 <div class="toast" id="toast"></div>
 <div class="loading-overlay" id="loadingOverlay">Carregando dados da planilha...</div>
