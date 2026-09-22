@@ -222,9 +222,11 @@ function normalizarDadosDaPlanilha(raw) {
     km: Number(m.km) || 0, 
     data: formatarDataPlanilhaParaISO(m.data), 
     valor: Number(m.valor) || 0, 
-    observacao: m.observacao || ''
+    observacao: m.observacao || '',
+    nome: m.nome || m['Nome'] || m.responsavel || '' // <-- ESSA LINHA É NOVA
   }));
-  
+
+ 
   const limites = {};
   (raw.limites || []).forEach(l => {
     const p = String(l.placa).trim().toUpperCase();
@@ -253,7 +255,8 @@ function normalizarDadosDaPlanilha(raw) {
     dataPrevista: a.dataPrevista ? formatarDataPlanilhaParaISO(a.dataPrevista) : '', 
     valor: Number(a.valor) || 0,
     observacao: a.observacao || '', 
-    criadoEm: a.criadoEm ? formatarDataPlanilhaParaISO(a.criadoEm) : ''
+    criadoEm: a.criadoEm ? formatarDataPlanilhaParaISO(a.criadoEm) : '',
+    nome: a.nome || a['Nome'] || a.responsavel || ''
   }));
 
   manutencoes.forEach(m => {
@@ -303,6 +306,10 @@ function fmtData(iso) {
   if (!iso) return '-'; 
   const [a, m, d] = iso.split('-'); 
   return `${d}/${m}/${a}`; 
+}
+function dataHoraAtual() {
+  const d = new Date();
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')} às ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
 function hojeISO() { return new Date().toISOString().split('T')[0]; }
@@ -627,14 +634,14 @@ function renderDetalhe() {
     <div class="card">
       <h2>Histórico</h2>
       <table><thead><tr><th>Tipo</th><th>Data</th><th>Km</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
-      <tbody>${ms.map(m => `<tr><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td>${fmtKm(m.km)}</td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td>
+      <tbody>${ms.map(m => `<tr title="👤 Registrado por: ${m.nome || 'Não identificado'}"><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td>${fmtKm(m.km)}</td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td>
         <td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button></td></tr>`).join('')}</tbody></table>
     </div>
     ${agends.length ? `
     <div class="card">
       <h2>Agendadas</h2>
       <table><thead><tr><th>Tipo</th><th>Previsão</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
-      <tbody>${agends.map(g => `<tr><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td>
+      <tbody>${agends.map(g => `<tr title="👤 Registrado por: ${g.nome || 'Não identificado'}"><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td>
         <td>
           <button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button> 
           <button class="btn secondary small" onclick="editarAgendamento('${g.id}')">Editar</button> 
@@ -711,13 +718,26 @@ function abrirModalManut(placa, manut, modo) {
   document.getElementById('mModo').disabled = !!manut;
   document.getElementById('mTipo').value = manut ? manut.tipo : ''; 
   document.getElementById('mDescricao').value = manut ? (manut.descricao || '') : '';
-  document.getElementById('mKm').value = manut ? manut.km : ''; 
+  
+  // Aqui está a correção: Exibe o km formatado com pontos (ex: 400.000)
+  document.getElementById('mKm').value = (manut && manut.km > 0) ? Number(manut.km).toLocaleString('pt-BR') : ''; 
+  
   document.getElementById('mData').value = manut ? manut.data : hojeISO(); 
   document.getElementById('mDataPrevista').value = '';
   document.getElementById('mValor').value = manut ? manut.valor : ''; 
   document.getElementById('mObs').value = manut ? (manut.observacao || '') : '';
+  
   onModoChange(); 
   onTipoChange(); 
+  
+  // O carimbo de quem está logado ou quem editou
+  const infoEdicao = document.getElementById('infoEdicao');
+ if (manut) {
+    infoEdicao.textContent = "👤 Última alteração: " + (manut.nome || "Não identificado");
+  } else {
+    infoEdicao.textContent = "👤 Lançando como: " + (localStorage.getItem("usuarioLogado") || "Desconhecido");
+  }
+  
   openModal('modalManut');
 }
 
@@ -726,7 +746,7 @@ function resolverAgendamento(id) {
   if (!ag) return;
   const v = db.veiculos.find(x => x.placa === ag.placa);
   
-  const nomeUsuario = localStorage.getItem("usuarioLogado") || "Desconhecido";
+ const nomeUsuario = (localStorage.getItem("usuarioLogado") || "Desconhecido") + " (em " + dataHoraAtual() + ")";
   
   const registro = { 
     id: gerarId(), 
@@ -769,20 +789,26 @@ function salvarManutencao() {
   const modo = document.getElementById('mModo').value;
   const tipo = document.getElementById('mTipo').value;
   const descricao = document.getElementById('mDescricao').value.trim();
-  const kmInput = document.getElementById('mKm').value;
+  const kmInput = document.getElementById('mKm').value.trim();
   const data = document.getElementById('mData').value;
   const dataPrevista = document.getElementById('mDataPrevista').value;
   
-  if (!tipo || (tipo === 'outro' && !descricao) || (modo !== 'agendar' && (!data || (kmInput && Number(kmInput) <= 0)))) {
+  // Aqui está a correção 1: Traduz o texto "400.000" para número matemático real
+  const kmParsed = parseNumeroBR(kmInput);
+
+  if (!tipo || (tipo === 'outro' && !descricao) || (modo !== 'agendar' && (!data || (kmInput !== '' && (isNaN(kmParsed) || kmParsed <= 0))))) {
     return toast('Preencha os campos corretamente', true);
   }
 
   closeModal('modalManut');
   const placa = veiculoSel;
   const v = db.veiculos.find(x => x.placa === placa);
-  const km = kmInput ? Number(kmInput) : (v ? v.kmAtual : 0);
+  
+  // Usa o valor traduzido
+  const km = kmInput !== '' ? kmParsed : (v ? v.kmAtual : 0);
+  
   const editando = !!manutEditId;
-  const nomeUsuario = localStorage.getItem("usuarioLogado") || "Desconhecido";
+  const nomeUsuario = (localStorage.getItem("usuarioLogado") || "Desconhecido") + " (em " + dataHoraAtual() + ")";
   
   if (modo === 'agendar') {
     const agOriginal = editando ? db.agendamentos.find(a => a.id === manutEditId) : null;
@@ -794,7 +820,8 @@ function salvarManutencao() {
       dataPrevista, 
       valor: Number(document.getElementById('mValor').value) || 0, 
       observacao: document.getElementById('mObs').value.trim(), 
-      criadoEm: agOriginal ? agOriginal.criadoEm : hojeISO() 
+      criadoEm: agOriginal ? agOriginal.criadoEm : hojeISO(),
+      nome: nomeUsuario // <--- Aqui está a correção 2: Agora o agendamento tem a assinatura!
     };
     
     if (editando) {
@@ -885,6 +912,8 @@ function editarAgendamento(id) {
   
   onModoChange(); 
   onTipoChange(); 
+  const infoEdicao = document.getElementById('infoEdicao');
+  infoEdicao.textContent = "👤 Agendado por: " + (ag.nome || "Não identificado");
   openModal('modalManut');
 }
 
