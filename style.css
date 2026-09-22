@@ -143,6 +143,11 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 .modal { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 100%; max-width: 440px; max-height: 88vh; overflow: auto; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
 
+/* TELA DE LOGIN ESPECÍFICA */
+.login-overlay { display: flex; background: rgba(17, 24, 39, 0.95); z-index: 9999; }
+.caixa-login { background: var(--card); padding: 40px; border-radius: 12px; width: 100%; max-width: 360px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); }
+.caixa-login h2 { color: #111827; margin-top: 0; }
+
 .back { cursor: pointer; color: var(--primary); font-size: 13px; font-weight: 600; margin-bottom: 16px; display: inline-block; }
 
 .limitbox { background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
