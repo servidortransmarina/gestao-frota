@@ -632,10 +632,26 @@ function renderDetalhe() {
       </div>
     </div>
     <div class="card">
-      <h2>Histórico</h2>
-      <table><thead><tr><th>Tipo</th><th>Data</th><th>Km</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
-      <tbody>${ms.map(m => `<tr title="👤 Registrado por: ${m.nome || 'Não identificado'}"><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td>${fmtKm(m.km)}</td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td>
-        <td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button></td></tr>`).join('')}</tbody></table>
+      <div class="header-tabela">
+        <h2>Histórico</h2>
+        <input type="text" id="filtroHistorico" placeholder="🔎 Pesquisar manutenção..." onkeyup="filtrarHistorico()">
+      </div>
+      <table id="tabelaHistorico">
+        <thead><tr><th>Tipo</th><th>Data</th><th>Km</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
+        <tbody>
+          ${ms.map(m => `<tr title="👤 Última alteração: ${m.nome || 'Não identificado'}">
+            <td>${nomeManutencao(m)}</td>
+            <td>${fmtData(m.data)}</td>
+            <td>${fmtKm(m.km)}</td>
+            <td>${fmtMoeda(m.valor)}</td>
+            <td>${m.observacao || '-'}</td>
+            <td>
+              <button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> 
+              <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button>
+            </td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
     </div>
     ${agends.length ? `
     <div class="card">
@@ -1196,3 +1212,23 @@ async function iniciar() {
 }
 
 iniciar();
+// ================= FILTRO DO HISTÓRICO EM TEMPO REAL =================
+function filtrarHistorico() {
+  // Pega o que foi digitado, joga para minúsculo e remove acentos
+  const input = document.getElementById('filtroHistorico').value.toLowerCase();
+  const termo = input.normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+  
+  const linhas = document.querySelectorAll('#tabelaHistorico tbody tr');
+  
+  linhas.forEach(linha => {
+    // Pega o texto de toda a linha, joga para minúsculo e remove acentos
+    const textoLinha = linha.textContent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+    
+    // Mostra a linha se a palavra bater, esconde se não bater
+    if (textoLinha.includes(termo)) {
+      linha.style.display = '';
+    } else {
+      linha.style.display = 'none';
+    }
+  });
+}
