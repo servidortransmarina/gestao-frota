@@ -42,6 +42,124 @@ function carregarCache() {
   } catch(e) { return false; }
 }
 
+/* ================= LOGIN E SESSÃO ================= */
+async function fazerLogin() {
+  const usuarioDigitado = document.getElementById("inputUsuario").value.trim();
+  const senhaDigitada = document.getElementById("inputSenha").value.trim();
+  const msgErro = document.getElementById("mensagemErro");
+  
+  if (!usuarioDigitado || !senhaDigitada) {
+    msgErro.textContent = "Preencha usuário e senha!";
+    msgErro.style.display = "block";
+    return;
+  }
+  
+  msgErro.style.display = "none";
+  const btn = document.querySelector('.caixa-login button');
+  btn.textContent = "Aguarde...";
+  btn.disabled = true;
+
+  try {
+    const resposta = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: "login",
+        data: {
+          usuario: usuarioDigitado,
+          senha: senhaDigitada
+        }
+      })
+    });
+    
+    const resultado = await resposta.json();
+    
+    if (resultado.sucesso) {
+      localStorage.setItem("usuarioLogado", resultado.nomeUsuario);
+      liberarAcesso(resultado.nomeUsuario);
+      toast("Bem-vindo(a), " + resultado.nomeUsuario + "!");
+    } else {
+      msgErro.textContent = "Usuário ou senha incorretos!";
+      msgErro.style.display = "block";
+    }
+  } catch (erro) {
+    msgErro.textContent = "Erro ao conectar com o servidor.";
+    msgErro.style.display = "block";
+  } finally {
+    btn.textContent = "Entrar no Sistema";
+    btn.disabled = false;
+  }
+}
+
+function liberarAcesso(nome) {
+  document.getElementById("telaLoginOverlay").style.display = "none";
+  document.getElementById("nomeUsuarioTopo").textContent = "👤 " + nome;
+  document.getElementById("btnSair").style.display = "inline-block";
+}
+
+function fazerLogout() {
+  localStorage.removeItem("usuarioLogado");
+  location.reload();
+}
+
+// Troca as telas dentro da caixinha
+function mostrarCadastro() {
+  document.getElementById("formLogin").style.display = "none";
+  document.getElementById("formCadastro").style.display = "block";
+  document.getElementById("mensagemErro").style.display = "none";
+}
+
+function mostrarLogin() {
+  document.getElementById("formCadastro").style.display = "none";
+  document.getElementById("formLogin").style.display = "block";
+  document.getElementById("mensagemErro").style.display = "none";
+}
+
+// Envia o pedido para o Google
+async function solicitarAcesso() {
+  const nome = document.getElementById("cadNome").value.trim();
+  const usuario = document.getElementById("cadUsuario").value.trim();
+  const senha = document.getElementById("cadSenha").value.trim();
+  const msgErro = document.getElementById("mensagemErro");
+
+  if (!nome || !usuario || !senha) {
+    msgErro.textContent = "Preencha todos os campos!";
+    msgErro.style.display = "block";
+    return;
+  }
+
+  msgErro.style.display = "none";
+  const btn = document.getElementById("btnCadastrar");
+  btn.textContent = "Enviando pedido...";
+  btn.disabled = true;
+
+  try {
+    const resposta = await fetch(API_URL, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: "requestRegistration",
+        data: { nome, usuario, senha }
+      })
+    });
+    
+    const resultado = await resposta.json();
+    
+    if (resultado.sucesso) {
+      alert("✅ Pedido enviado! Aguarde a aprovação do administrador para conseguir fazer login.");
+      // Limpa os campos e volta pro login
+      document.getElementById("cadNome").value = "";
+      document.getElementById("cadUsuario").value = "";
+      document.getElementById("cadSenha").value = "";
+      mostrarLogin();
+    }
+  } catch (erro) {
+    msgErro.textContent = "Erro ao enviar pedido.";
+    msgErro.style.display = "block";
+  } finally {
+    btn.textContent = "Solicitar Aprovação";
+    btn.disabled = false;
+  }
+}
+
 /* ================= FILA E COMUNICAÇÃO OTIMIZADA ================= */
 let _fila = Promise.resolve();
 function enfileirar(fn) {
@@ -55,7 +173,6 @@ function setLoading(v) {
   document.getElementById('loadingOverlay').classList.toggle('show', v);
 }
 
-// Executa em segundo plano com auto-recuperação
 function execBackground(asyncFn, failMsg) {
   asyncFn().catch(e => {
     console.error(e);
@@ -609,7 +726,8 @@ function resolverAgendamento(id) {
   if (!ag) return;
   const v = db.veiculos.find(x => x.placa === ag.placa);
   
-  // Cria o registro no histórico automaticamente pegando os dados do agendamento
+  const nomeUsuario = localStorage.getItem("usuarioLogado") || "Desconhecido";
+  
   const registro = { 
     id: gerarId(), 
     placa: ag.placa, 
@@ -618,13 +736,13 @@ function resolverAgendamento(id) {
     km: v ? v.kmAtual : 0, 
     data: ag.dataPrevista || hojeISO(), 
     valor: Number(ag.valor) || 0, 
-    observacao: ag.observacao || '' 
+    observacao: ag.observacao || '',
+    nome: nomeUsuario 
   };
   
   db.manutencoes.push(registro);
   db.agendamentos = db.agendamentos.filter(a => a.id !== ag.id);
   
-  // Limpa o alerta associado na hora
   const tipoA = ag.tipo === 'outro' ? (ag.descricao || 'outro') : ag.tipo;
   const ex = db.alertas.find(a => a.placa === ag.placa && a.tipo === tipoA && a.status !== 'resolvido');
   if (!ex) {
@@ -664,6 +782,7 @@ function salvarManutencao() {
   const v = db.veiculos.find(x => x.placa === placa);
   const km = kmInput ? Number(kmInput) : (v ? v.kmAtual : 0);
   const editando = !!manutEditId;
+  const nomeUsuario = localStorage.getItem("usuarioLogado") || "Desconhecido";
   
   if (modo === 'agendar') {
     const agOriginal = editando ? db.agendamentos.find(a => a.id === manutEditId) : null;
@@ -710,7 +829,8 @@ function salvarManutencao() {
     km, 
     data, 
     valor: Number(document.getElementById('mValor').value) || 0, 
-    observacao: document.getElementById('mObs').value.trim() 
+    observacao: document.getElementById('mObs').value.trim(),
+    nome: nomeUsuario 
   };
   
   const agCumpridos = db.agendamentos.filter(a => a.placa === placa && a.tipo === tipo && (tipo !== 'outro' || (a.descricao || '').trim().toLowerCase() === descricao.toLowerCase()));
@@ -767,8 +887,6 @@ function editarAgendamento(id) {
   onTipoChange(); 
   openModal('modalManut');
 }
-
-
 
 function excluirManutencao(id) {
   document.getElementById('confirmTitle').textContent = 'Excluir manutenção';
@@ -1026,13 +1144,26 @@ function renderAlertas() {
 async function iniciar() {
   setInterval(() => { document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }, 60000);
   document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  if (carregarCache()) { 
-    renderCadastro(); 
-    carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
-  } else { 
-    await carregarDoServidor(); 
-    sincronizarAlertas(false); 
-    renderCadastro(); 
+  
+  const usuarioSalvo = localStorage.getItem("usuarioLogado");
+  
+  if (usuarioSalvo) {
+    liberarAcesso(usuarioSalvo);
+    if (carregarCache()) { 
+      renderCadastro(); 
+      carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
+    } else { 
+      await carregarDoServidor(); 
+      sincronizarAlertas(false); 
+      renderCadastro(); 
+    }
+  } else {
+    // A tela preta segura o usuário até ele logar. Mas já vai buscando os dados no fundo pra ser rápido.
+    if (carregarCache()) { 
+      renderCadastro(); 
+      carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
+    }
   }
 }
+
 iniciar();
