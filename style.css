@@ -15,8 +15,8 @@
   --primary: #4f46e5; 
   /* Cores de status adaptadas para fundo claro */
   --success: #10b981; 
-  --warning: #f59e0b; 
-  --danger: #ef4444; 
+  --warning: #ffa201; 
+  --danger: #f13636; 
 }
 
 * { box-sizing: border-box; }
@@ -198,3 +198,14 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 .alert-card .alert-title { font-weight: 600; color: #111827; font-size: 14px; }
 .alert-card .alert-sub { font-size: 13px; color: var(--dim); margin-top: 4px; }
 .alert-card .alert-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+.header-tabela { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  margin-bottom: 12px; 
+  flex-wrap: wrap; 
+  gap: 10px; 
+}
+.header-tabela h2 { margin: 0; }
+#filtroHistorico { max-width: 260px; margin: 0; }
