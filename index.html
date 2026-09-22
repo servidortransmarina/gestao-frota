@@ -172,7 +172,7 @@
     <div class="row" id="mKmDataRow">
       <div class="field">
         <label>Quilometragem (em branco = km atual)</label>
-        <input type="number" id="mKm" placeholder="Ex.: 45000">
+        <input type="text" inputmode="numeric" id="mKm" placeholder="Ex: 450.000">
         <small class="errmsg" id="errMKm"></small>
       </div>
       <div class="field">
@@ -193,9 +193,12 @@
       <label>Observação</label>
       <input type="text" id="mObs" placeholder="Opcional">
     </div>
-    <div class="modal-actions">
-      <button class="btn secondary" onclick="closeModal('modalManut')">Cancelar</button>
-      <button class="btn" id="btnSalvarManut" onclick="salvarManutencao()">Salvar</button>
+    <div class="modal-actions" style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 20px;">
+      <div id="infoEdicao" style="font-size: 13px; color: var(--primary); font-weight: 600;"></div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn secondary" onclick="closeModal('modalManut')">Cancelar</button>
+        <button class="btn" id="btnSalvarManut" onclick="salvarManutencao()">Salvar</button>
+      </div>
     </div>
   </div>
 </div>
