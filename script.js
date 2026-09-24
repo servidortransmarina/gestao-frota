@@ -593,9 +593,9 @@ function sincronizarAlertas(bgSync = true) {
           if (ultResolvido) deveRecriar = db.manutencoes.some(m => m.placa === v.placa && m.tipo === tipo && m.data >= ultResolvido.dataResolucao);
           if (deveRecriar) paraAdicionar.push({ id: gerarId(), placa: v.placa, tipo, status: 'ativo', dataAnalise: null, dataResolucao: null });
         }
-      } else if (abertoExistente) {
-        // Remove apenas se for um alerta ativo ou em análise que deixou de ser necessário
-        // NUNCA coloca alertas com status 'resolvido' na lista de remoção
+      } else if (abertoExistente && abertoExistente.status === 'ativo') {
+        // Remove apenas se for um alerta automático 'ativo' que não atingiu o KM. 
+        // Se um humano colocou em 'analise' antecipadamente, o sistema respeita e não apaga.
         idsParaRemover.push(abertoExistente.id);
       }
     }
@@ -1111,7 +1111,85 @@ function alterarAlerta(id, status, isResolucao = false) {
 
 function marcarAnalise(id) { alterarAlerta(id, 'analise'); }
 function reabrirAlerta(id) { alterarAlerta(id, 'ativo'); }
-function reativarResolvido(id) { alterarAlerta(id, 'ativo'); }
+function reativarResolvido(id) { 
+  const a = db.alertas.find(x => x.id === id); 
+  if (!a) return;
+  
+  // Busca se esse alerta resolvido possui uma manutenção vinculada (caso tenha vindo de um agendamento)
+  const m = db.manutencoes.find(x => x.placa === a.placa && x.data === a.dataResolucao && (x.tipo === a.tipo || (x.tipo === 'outro' && x.descricao === a.tipo)));
+  
+  if (m) {
+    document.getElementById('confirmTitle').textContent = 'Desfazer Manutenção';
+    document.getElementById('confirmMsg').textContent = `Isto vai apagar o registro de ${fmtMoeda(m.valor)} do histórico do veículo ${a.placa} e devolver o item para a aba de pendentes. Confirma?`;
+    const btn = document.getElementById('confirmBtn');
+    
+    btn.onclick = () => {
+      closeModal('modalConfirm'); 
+      
+      // 1. Remove a manutenção do histórico
+      db.manutencoes = db.manutencoes.filter(x => x.id !== m.id);
+      
+      // 2. Recria o agendamento para o usuário não perder os dados
+      const novoAg = {
+        id: gerarId(),
+        placa: m.placa,
+        tipo: m.tipo,
+        descricao: m.descricao,
+        dataPrevista: m.data, // Usa a data da resolução como nova previsão
+        valor: m.valor,
+        observacao: m.observacao,
+        criadoEm: hojeISO(),
+        nome: localStorage.getItem("usuarioLogado") || 'Desconhecido'
+      };
+      db.agendamentos.push(novoAg);
+
+      // 3. Apaga o alerta resolvido (o novo agendamento já gera o card visual automaticamente)
+      db.alertas = db.alertas.filter(x => x.id !== a.id);
+      
+      salvarCache(); 
+      renderTelaAtual();
+      sincronizarAlertas(false);
+      toast('Desfeito! Voltou para os agendamentos.');
+      
+      execBackground(async () => {
+        await apiPost('deleteManutencao', { id: m.id });
+        await apiPost('deleteAlerta', { id: a.id });
+        await apiPost('addAgendamento', novoAg);
+        sincronizarAlertas(true);
+      }, 'Erro ao desfazer');
+    }; 
+    
+    openModal('modalConfirm');
+    return;
+  }
+
+  // Se não tinha manutenção atrelada (foi apenas um clique de alerta comum), reabre normal
+  alterarAlerta(id, 'ativo'); 
+}
+
+function iniciarAnaliseAgendamento(id) {
+  const ag = db.agendamentos.find(a => a.id === id);
+  if (!ag) return;
+  
+  const tipoA = ag.tipo === 'outro' ? (ag.descricao || 'outro') : ag.tipo;
+  
+  const novoAlerta = { 
+    id: gerarId(), 
+    placa: ag.placa, 
+    tipo: tipoA, 
+    status: 'analise', 
+    dataAnalise: hojeISO(), 
+    dataResolucao: null 
+  };
+  
+  db.alertas.push(novoAlerta);
+  salvarCache(); 
+  renderTelaAtual();
+  
+  execBackground(async () => { 
+    await apiPost('addAlerta', novoAlerta); 
+  }, 'Erro ao mover para andamento');
+}
 
 function excluirRegistroResolvido(id) {
   document.getElementById('confirmTitle').textContent = 'Excluir registro';
@@ -1179,9 +1257,9 @@ function montarCardAgAtrasado(ag) {
       <div class="alert-sub" style="color:var(--danger); font-weight:bold;">⚠️ Agendamento Atrasado: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div>
     </div>
     <div class="alert-actions">
+      <button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button>
       <button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button>
       <button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button>
-      <button class="btn small secondary" onclick="irParaVeiculo('${ag.placa}')">Ver</button>
     </div>
   </div>`;
 }
@@ -1193,9 +1271,9 @@ function montarCardAgPendente(ag) {
       <div class="alert-sub">Agendado para: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div>
     </div>
     <div class="alert-actions">
+      <button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button>
       <button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button>
       <button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button>
-      <button class="btn small secondary" onclick="irParaVeiculo('${ag.placa}')">Ver</button>
     </div>
   </div>`;
 }
