@@ -209,3 +209,159 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 }
 .header-tabela h2 { margin: 0; }
 #filtroHistorico { max-width: 260px; margin: 0; }
+
+/* ================= PLACAS VISUAIS ================= */
+#chipsVeiculos { 
+  display: flex; flex-wrap: wrap; gap: 16px; padding: 10px; justify-content: center; 
+}
+
+.placa-veiculo {
+  position: relative; border: 2px solid #333; border-radius: 6px; width: 140px;
+  cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); display: flex;
+  flex-direction: column; transition: transform 0.1s; overflow: hidden;
+}
+
+.placa-veiculo:active { transform: scale(0.95); }
+
+/* Padrão Mercosul (Fundo branco, tarja azul) */
+.placa-veiculo.mercosul { background: #ffffff; }
+.placa-veiculo.mercosul .placa-topo { background-color: #003399; color: #ffffff; }
+.placa-veiculo.mercosul .placa-numero { color: #000000; }
+
+/* Padrão Antigo (Fundo cinza, tarja preta) */
+.placa-veiculo.antiga { background: #cfd2d6; }
+.placa-veiculo.antiga .placa-topo { background-color: #333333; color: #ffffff; }
+.placa-veiculo.antiga .placa-numero { color: #333333; }
+
+.placa-topo { 
+  text-align: center; font-size: 10px; font-weight: bold; padding: 3px 0; letter-spacing: 1px; 
+}
+
+.placa-numero { 
+  text-align: center; font-size: 22px; font-weight: 900; font-family: "Arial Black", sans-serif; 
+  padding: 8px 0; letter-spacing: 2px; 
+}
+
+.placa-status-dot {
+  position: absolute; top: -6px; right: -6px; width: 18px; height: 18px;
+  border-radius: 50%; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); z-index: 2;
+}
+
+/* ================= CABEÇALHO DO VEÍCULO ================= */
+.veiculo-header-info {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.veiculo-km-box {
+  font-size: 25px;
+}
+
+.veiculo-km-label {
+  color: #000000; 
+  font-family: "Arial", sans-serif;
+  font-size: 23px; 
+  font-weight: bold;
+}
+
+.veiculo-km-valor {
+  color: var(--text);
+  font-size: 17px; /* Tamanho reduzido como você pediu */
+  display: block;
+  margin-top: 2px;
+  font-weight: bold;
+}
+
+/* ================= SLIDE DE ALERTAS (REGRA GERAL PARA PC) ================= */
+.alert-config-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+/* ================= RESPONSIVIDADE (CELULAR) ================= */
+@media (max-width: 768px) {
+  
+  /* Reorganiza o cabeçalho para não encavalar os itens */
+  header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+    padding: 16px;
+  }
+  
+  .header-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  /* Transforma o menu de botões num carrossel que rola para o lado */
+  nav {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch; /* Rolagem suave no iPhone */
+    padding-bottom: 2px;
+  }
+  
+  nav button {
+    white-space: nowrap; /* Impede o texto do botão de quebrar linha */
+    padding: 12px 16px;
+  }
+
+  /* Impede que tabelas largas quebrem a tela (cria rolagem lateral) */
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  /* Ajusta margens e tamanhos internos para aproveitar o espaço da telinha */
+  main {
+    padding: 12px;
+  }
+  
+  .card {
+    padding: 16px;
+  }
+
+  .grid-cards {
+    grid-template-columns: 1fr; /* Um card por linha */
+  }
+
+  /* Botões grandes na parte inferior dos modais para facilitar o clique */
+  .modal-actions {
+    flex-direction: column-reverse;
+  }
+  
+  .modal-actions button {
+    width: 100%;
+    padding: 12px;
+    font-size: 16px;
+  }
+
+  /* Garante que o input e o botão da tela de cadastro ocupem a largura toda */
+  #tab-cadastro .row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* Transforma a grade de alertas em um slide arrastável SOMENTE NO CELULAR */
+  .alert-config-container {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch; /* Rolagem lisa no celular */
+    scroll-snap-type: x mandatory; /* Cria o efeito de encaixe ao arrastar */
+    padding-bottom: 10px; /* Deixa um respiro para a barra de rolagem */
+  }
+  
+  .alert-config-container .limitbox {
+    min-width: 270px; /* Largura ideal do cartão na tela do celular */
+    flex-shrink: 0; /* Impede que os cartões sejam esmagados */
+    scroll-snap-align: start; /* Faz o cartão "estacionar" certinho na borda */
+    margin-bottom: 0;
+  }
+
+} 
