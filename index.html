@@ -36,7 +36,7 @@
     <div class="row">
       <div class="field" style="flex:1;">
         <label>Placa do veículo</label>
-        <input id="inputPlaca" placeholder="Ex: ABC1234 ou ABC1D23" maxlength="8">
+        <input id="inputPlaca" placeholder="Ex: ABC1234 ou ABC1D23" maxlength="8" onkeypress="if(event.key === 'Enter') cadastrarVeiculo()">
         <small class="errmsg" id="errPlaca"></small>
       </div>
       <button class="btn" id="btnCadastrarVeiculo" onclick="cadastrarVeiculo()">Cadastrar</button>
@@ -104,11 +104,11 @@
     <div id="formLogin">
       <div class="field" style="margin-bottom: 15px; text-align: left;">
         <!-- autocomplete="off" bloqueia o preenchimento indevido do usuário -->
-        <input type="text" id="inputUsuario" placeholder="Usuário (ex: JoaoPaulo)" autocomplete="off">
+        <input type="text" id="inputUsuario" placeholder="Usuário (ex: JoaoPaulo)" autocomplete="off" onkeypress="if(event.key === 'Enter') document.getElementById('inputSenha').focus()">
       </div>
       <div class="field" style="margin-bottom: 20px; text-align: left;">
         <!-- autocomplete="new-password" força o Chrome a não sugerir senhas velhas -->
-        <input type="password" id="inputSenha" placeholder="Senha" autocomplete="new-password">
+        <input type="password" id="inputSenha" placeholder="Senha" autocomplete="new-password" onkeypress="if(event.key === 'Enter') fazerLogin()">
       </div>
       <button class="btn" id="btnLogin" onclick="fazerLogin()" style="width: 100%; font-size:15px; padding:12px;">Entrar</button>
       <p style="margin-top: 15px; font-size: 13px; text-align: center;">
@@ -125,7 +125,7 @@
         <input type="text" id="cadUsuario" placeholder="Escolha um Usuário (ex: LuisArtur)" autocomplete="off">
       </div>
       <div class="field" style="margin-bottom: 20px; text-align: left;">
-        <input type="password" id="cadSenha" placeholder="Crie uma Senha" autocomplete="new-password">
+        <input type="password" id="cadSenha" placeholder="Crie uma Senha" autocomplete="new-password" onkeypress="if(event.key === 'Enter') solicitarAcesso()"> 
       </div>
       <button class="btn" id="btnCadastrar" onclick="solicitarAcesso()" style="width: 100%; font-size:15px; padding:12px; background-color: var(--warning);">Solicitar Aprovação</button>
       <p style="margin-top: 15px; font-size: 13px; text-align: center;">
@@ -194,7 +194,7 @@
     </div>
     <div class="field">
       <label>Valor (R$)</label>
-      <input type="number" id="mValor" min="0" step="0.01">
+      <input type="number" id="mValor" min="0" step="0.01" onkeypress="if(event.key === 'Enter') salvarManutencao()">
     </div>
     <div class="field">
       <label>Observação</label>
@@ -215,7 +215,7 @@
     <h3>Atualizar quilometragem atual</h3>
     <div class="field">
       <label>Quilometragem atual (km) *</label>
-      <input id="kmAtualInput" type="text" inputmode="numeric" placeholder="Ex: 440.000">
+      <input id="kmAtualInput" type="text" inputmode="numeric" placeholder="Ex: 440.000" onkeypress="if(event.key === 'Enter') salvarKmAtual()">
       <small class="errmsg" id="errKmAtual"></small>
     </div>
     <div class="modal-actions">
