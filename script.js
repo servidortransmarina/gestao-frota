@@ -1268,35 +1268,38 @@ function renderAlertas() {
 function verificarSessao() {
   const usuario = localStorage.getItem("usuarioLogado");
   const dataLogin = localStorage.getItem("dataLogin");
+  const perfil = localStorage.getItem("perfilUsuario");
   const dataHoje = new Date().toLocaleDateString('pt-BR');
 
-  // Se não tem utilizador ou se a data do login for diferente de hoje, força a saída
+  // Se não há usuário logado ou a sessão for antiga, apenas limpa a memória e retorna nulo (SEM recarregar a página)
   if (!usuario || dataLogin !== dataHoje) {
     localStorage.removeItem("usuarioLogado");
     localStorage.removeItem("dataLogin");
+    localStorage.removeItem("perfilUsuario");
     return null;
   }
-  return usuario;
+  
+  return { usuario, perfil };
 }
 
 async function iniciar() {
   setInterval(() => { document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }, 60000);
   document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   
-  const usuarioSalvo = verificarSessao(); // Valida se a sessão é do próprio dia
+  const sessao = verificarSessao();
   
-  if (usuarioSalvo) {
-    liberarAcesso(usuarioSalvo);
+  if (sessao && sessao.usuario) {
+    liberarAcesso(sessao.usuario, sessao.perfil); // <-- Repassa o perfil para manter as abas ocultas
     if (carregarCache()) { 
-      renderCadastro(); 
+      renderTelaAtual(); 
       carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
     } else { 
       await carregarDoServidor(); 
       sincronizarAlertas(false); 
-      renderCadastro(); 
+      renderTelaAtual(); 
     }
   } else {
-    // A tela preta segura o utilizador até ele logar. Mas já vai buscando os dados no fundo pra ser rápido.
+    // A tela preta segura o utilizador até ele logar.
     if (carregarCache()) { 
       renderCadastro(); 
       carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
@@ -1305,19 +1308,15 @@ async function iniciar() {
 }
 
 iniciar();
+
 // ================= FILTRO DO HISTÓRICO EM TEMPO REAL =================
 function filtrarHistorico() {
-  // Pega o que foi digitado, joga para minúsculo e remove acentos
   const input = document.getElementById('filtroHistorico').value.toLowerCase();
   const termo = input.normalize('NFD').replace(/[\u0300-\u036f]/g, "");
-  
   const linhas = document.querySelectorAll('#tabelaHistorico tbody tr');
   
   linhas.forEach(linha => {
-    // Pega o texto de toda a linha, joga para minúsculo e remove acentos
     const textoLinha = linha.textContent.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "");
-    
-    // Mostra a linha se a palavra bater, esconde se não bater
     if (textoLinha.includes(termo)) {
       linha.style.display = '';
     } else {
