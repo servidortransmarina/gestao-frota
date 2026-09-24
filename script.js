@@ -47,60 +47,96 @@ async function fazerLogin() {
   const usuarioDigitado = document.getElementById("inputUsuario").value.trim();
   const senhaDigitada = document.getElementById("inputSenha").value.trim();
   const msgErro = document.getElementById("mensagemErro");
-  
-  if (!usuarioDigitado || !senhaDigitada) {
-    msgErro.textContent = "Preencha usuário e senha!";
-    msgErro.style.display = "block";
-    return;
-  }
+  if (!usuarioDigitado || !senhaDigitada) { msgErro.textContent = "Preencha usuário e senha!"; msgErro.style.display = "block"; return; }
   
   msgErro.style.display = "none";
   const btn = document.querySelector('.caixa-login button');
-  btn.textContent = "Aguarde...";
-  btn.disabled = true;
+  btn.textContent = "Aguarde..."; btn.disabled = true;
 
   try {
     const resposta = await fetch(API_URL, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: "login",
-        data: {
-          usuario: usuarioDigitado,
-          senha: senhaDigitada
-        }
-      })
+      method: 'POST', body: JSON.stringify({ action: "login", data: { usuario: usuarioDigitado, senha: senhaDigitada } })
     });
-    
     const resultado = await resposta.json();
     
     if (resultado.sucesso) {
+      const dataHoje = new Date().toLocaleDateString('pt-BR');
+      const perfilRetornado = resultado.perfil || 'admin'; // Proteção caso a API não envie
+      
       localStorage.setItem("usuarioLogado", resultado.nomeUsuario);
-      liberarAcesso(resultado.nomeUsuario);
+      localStorage.setItem("dataLogin", dataHoje);
+      localStorage.setItem("perfilUsuario", perfilRetornado); 
+      
+      liberarAcesso(resultado.nomeUsuario, perfilRetornado);
       toast("Bem-vindo(a), " + resultado.nomeUsuario + "!");
     } else {
       msgErro.textContent = "Usuário ou senha incorretos!";
       msgErro.style.display = "block";
     }
-  } catch (erro) {
-    msgErro.textContent = "Erro ao conectar com o servidor.";
-    msgErro.style.display = "block";
   } finally {
-    btn.textContent = "Entrar no Sistema";
-    btn.disabled = false;
+    btn.textContent = "Entrar no Sistema"; btn.disabled = false;
   }
 }
 
-function liberarAcesso(nome) {
+function liberarAcesso(nome, perfil) {
   document.getElementById("telaLoginOverlay").style.display = "none";
   document.getElementById("nomeUsuarioTopo").textContent = "👤 " + nome;
   document.getElementById("btnSair").style.display = "inline-block";
+  
+  // Controle de Permissões: Oculta botões do menu se for mecânico
+  if (perfil === 'mecanico') {
+    document.querySelector('.navbtn[data-tab="cadastro"]').style.display = 'none';
+    document.querySelector('.navbtn[data-tab="dashboard"]').style.display = 'none';
+    // Força a navegação para a aba de Manutenção
+    document.querySelector('.navbtn[data-tab="manutencao"]').click();
+  } else {
+    document.querySelector('.navbtn[data-tab="cadastro"]').style.display = 'inline-block';
+    document.querySelector('.navbtn[data-tab="dashboard"]').style.display = 'inline-block';
+  }
 }
 
 function fazerLogout() {
   localStorage.removeItem("usuarioLogado");
+  localStorage.removeItem("dataLogin");
+  localStorage.removeItem("perfilUsuario");
   location.reload();
 }
 
+function verificarSessao() {
+  const usuario = localStorage.getItem("usuarioLogado");
+  const dataLogin = localStorage.getItem("dataLogin");
+  const perfil = localStorage.getItem("perfilUsuario");
+  const dataHoje = new Date().toLocaleDateString('pt-BR');
+
+  if (!usuario || dataLogin !== dataHoje) {
+    fazerLogout();
+    return null;
+  }
+  return { usuario, perfil };
+}
+
+async function iniciar() {
+  setInterval(() => { document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }, 60000);
+  document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  
+  const sessao = verificarSessao();
+  
+  if (sessao && sessao.usuario) {
+    liberarAcesso(sessao.usuario, sessao.perfil);
+    if (carregarCache()) { 
+      renderTelaAtual(); 
+      carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
+    } else { 
+      await carregarDoServidor(); 
+      sincronizarAlertas(false); 
+      renderTelaAtual(); 
+    }
+  } else {
+    if (carregarCache()) { 
+      carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
+    }
+  }
+}
 // Troca as telas dentro da caixinha
 function mostrarCadastro() {
   document.getElementById("formLogin").style.display = "none";
@@ -223,7 +259,7 @@ function normalizarDadosDaPlanilha(raw) {
     data: formatarDataPlanilhaParaISO(m.data), 
     valor: Number(m.valor) || 0, 
     observacao: m.observacao || '',
-    nome: m.nome || m['Nome'] || m.responsavel || '' // <-- ESSA LINHA É NOVA
+    nome: m.nome || m['Nome'] || m.responsavel || '' 
   }));
 
  
@@ -474,14 +510,27 @@ function renderManutTab() {
   document.getElementById('manutDetalheWrap').style.display = 'none';
   document.getElementById('manutListaWrap').style.display = 'block';
   const wrap = document.getElementById('chipsVeiculos');
+  
   if (db.veiculos.length === 0) { 
     wrap.innerHTML = '<div class="empty">Nenhum veículo cadastrado.</div>'; 
     return; 
   }
+  
   wrap.innerHTML = db.veiculos.map(v => {
     const st = statusVeiculo(v.placa);
     const cor = st === 'atrasado' ? 'var(--danger)' : (st === 'analise' ? 'var(--warning)' : 'var(--success)');
-    return `<span class="chip" onclick="selecionarVeiculo('${v.placa}')"><span class="dot" style="background:${cor}"></span>${v.placa}</span>`;
+    
+    // O sistema analisa o 5º dígito. Se for letra, é Mercosul. Se for número, é Antiga.
+    const isMercosul = /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(v.placa);
+    const classePlaca = isMercosul ? 'mercosul' : 'antiga';
+    const nomeTopo = isMercosul ? 'BRASIL' : 'TRANSMARINA';
+
+    return `
+      <div class="placa-veiculo ${classePlaca}" onclick="selecionarVeiculo('${v.placa}')">
+        <div class="placa-status-dot" style="background:${cor}"></div>
+        <div class="placa-topo">${nomeTopo}</div>
+        <div class="placa-numero">${v.placa}</div>
+      </div>`;
   }).join('');
 }
 
@@ -593,26 +642,52 @@ function renderDetalhe() {
     return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult ? fmtData(ult.data) + ' · ' + fmtKm(ult.km) : 'Sem registro'}</div></div>`;
   }).join('');
 
+ const perfil = localStorage.getItem("perfilUsuario") || "admin";
+  const isAdmin = perfil !== "mecanico";
+
+  // Identifica o padrão da placa selecionada
+  const isMercosul = /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(placa);
+  const classePlaca = isMercosul ? 'mercosul' : 'antiga';
+  const nomeTopo = isMercosul ? 'BRASIL' : 'TRANSMARINA';
+
   document.getElementById('manutDetalheWrap').innerHTML = `
     <div class="back" onclick="renderManutTab()">← Voltar para lista de veículos</div>
     <div class="card">
-      <div class="row" style="justify-content:space-between;">
-        <div><h2 style="margin-bottom:4px;">Veículo ${placa}</h2>
-        <div style="color:var(--dim);font-size:13px;">Km atual: <b style="color:var(--text)">${fmtKm(v.kmAtual)}</b></div></div>
-        <div style="display:flex;gap:8px;">
-          <button class="btn secondary" onclick="abrirModalKm('${placa}')">Atualizar KM</button>
+      <div class="row" style="justify-content:space-between; align-items:center;">
+        
+        <div class="veiculo-header-info">
+          <!-- A Placa Gráfica -->
+          <div class="placa-veiculo ${classePlaca}" style="cursor:default; margin:0;">
+            <div class="placa-topo">${nomeTopo}</div>
+            <div class="placa-numero">${placa}</div>
+          </div>
+          
+          <!-- O KM puxando a formatação do CSS -->
+          <div class="veiculo-km-box">
+            <span class="veiculo-km-label">Km atual:</span> 
+            <span class="veiculo-km-valor">${fmtKm(v.kmAtual)}</span>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px;">
+          ${isAdmin ? `<button class="btn secondary" onclick="abrirModalKm('${placa}')">Atualizar KM</button>` : ''}
           <button class="btn" onclick="abrirModalManut('${placa}')">Marcar manutenção</button>
         </div>
       </div>
     </div>
+
+    ${isAdmin ? `
     <div class="grid-cards">
       <div class="kpi"><div class="label">Total gasto</div><div class="value">${fmtMoeda(total)}</div></div>
       <div class="kpi"><div class="label">Nº manutenções</div><div class="value">${ms.length}</div></div>
       ${cardsTipos}
     </div>
+    ` : ''}
+
+    ${isAdmin ? `
     <div class="card">
       <h2>Configuração de alertas</h2>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+      <div class="alert-config-container">
         ${TIPOS_RASTREADOS.map(tipo => `
           <div class="limitbox">
             <div style="font-weight:bold;margin-bottom:8px;">${TIPOS[tipo]}</div>
@@ -631,6 +706,9 @@ function renderDetalhe() {
           </div>`).join('')}
       </div>
     </div>
+    ` : ''}
+    
+    <!-- O restante do código do histórico continua igual abaixo disso -->
     <div class="card">
       <div class="header-tabela">
         <h2>Histórico</h2>
@@ -1185,12 +1263,27 @@ function renderAlertas() {
                 sec('resolvido', '🟢 Resolvido', g.resolvido.map(montarCardAlerta).join(''), g.resolvido.length);
 }
 
+
 /* ================= INICIALIZAÇÃO ================= */
+function verificarSessao() {
+  const usuario = localStorage.getItem("usuarioLogado");
+  const dataLogin = localStorage.getItem("dataLogin");
+  const dataHoje = new Date().toLocaleDateString('pt-BR');
+
+  // Se não tem utilizador ou se a data do login for diferente de hoje, força a saída
+  if (!usuario || dataLogin !== dataHoje) {
+    localStorage.removeItem("usuarioLogado");
+    localStorage.removeItem("dataLogin");
+    return null;
+  }
+  return usuario;
+}
+
 async function iniciar() {
   setInterval(() => { document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' }); }, 60000);
   document.getElementById('dateNow').textContent = new Date().toLocaleString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   
-  const usuarioSalvo = localStorage.getItem("usuarioLogado");
+  const usuarioSalvo = verificarSessao(); // Valida se a sessão é do próprio dia
   
   if (usuarioSalvo) {
     liberarAcesso(usuarioSalvo);
@@ -1203,7 +1296,7 @@ async function iniciar() {
       renderCadastro(); 
     }
   } else {
-    // A tela preta segura o usuário até ele logar. Mas já vai buscando os dados no fundo pra ser rápido.
+    // A tela preta segura o utilizador até ele logar. Mas já vai buscando os dados no fundo pra ser rápido.
     if (carregarCache()) { 
       renderCadastro(); 
       carregarDoServidor(true).then(() => sincronizarAlertas(true)); 
