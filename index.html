@@ -159,46 +159,42 @@
         <option value="agendar">Agendar para o futuro</option>
       </select>
     </div>
+    
+    <!-- NOVO MOTOR INTELIGENTE -->
     <div class="field">
-      <label>Tipo de manutenção *</label>
-      <select id="mTipo" onchange="onTipoChange()">
-        <option value="">Selecione...</option>
-        <option value="oleo">Troca de óleo</option>
-        <option value="alinhamento">Alinhamento</option>
-        <option value="oleo_caixa">Troca de óleo da caixa</option>
-        <option value="oleo_diferencial">Troca de óleo do diferencial</option>
-        <option value="outro">Outro</option>
-      </select>
-      <small class="errmsg" id="errMTipo"></small>
-    </div>
-    <div class="field" id="mDescricaoWrap" style="display:none;">
       <label>Qual manutenção será feita? *</label>
-      <input type="text" id="mDescricao" list="descricoesList" placeholder="Ex.: Troca de pastilha de freio">
-      <datalist id="descricoesList"></datalist>
+      <input type="text" id="mTipoInput" list="listaServicos" placeholder="Ex: Alinhamento, Troca de óleo motor, Pastilha..." onkeypress="if(event.key === 'Enter') document.getElementById('mKm').focus()">
+      <datalist id="listaServicos">
+        <option value="Alinhamento">
+        <option value="Troca de óleo do motor">
+        <option value="Troca de óleo da caixa">
+        <option value="Troca de óleo do diferencial">
+      </datalist>
     </div>
-    <div class="row" id="mKmDataRow">
+
+    <!-- O KM AGORA É FIXO E SEMPRE APARECE -->
+    <div class="row">
       <div class="field">
-        <label>Quilometragem (em branco = km atual)</label>
-        <input type="text" inputmode="numeric" id="mKm" placeholder="Ex: 450.000">
+        <label>Km atual (obrigatório)</label>
+        <input type="text" inputmode="numeric" id="mKm" placeholder="Ex: 450.000" onkeypress="if(event.key === 'Enter') document.getElementById('mData').focus()">
         <small class="errmsg" id="errMKm"></small>
       </div>
-      <div class="field">
+      <div class="field" id="mDataRealizadaWrap">
         <label>Data *</label>
-        <input type="date" id="mData">
-        <small class="errmsg" id="errMData"></small>
+        <input type="date" id="mData" onkeypress="if(event.key === 'Enter') document.getElementById('mValor').focus()">
       </div>
-    </div>
-    <div class="field" id="mDataPrevistaWrap" style="display:none;">
-      <label>Data prevista (opcional)</label>
-      <input type="date" id="mDataPrevista">
+      <div class="field" id="mDataPrevistaWrap" style="display:none;">
+        <label>Data prevista</label>
+        <input type="date" id="mDataPrevista" onkeypress="if(event.key === 'Enter') document.getElementById('mValor').focus()">
+      </div>
     </div>
     <div class="field">
       <label>Valor (R$)</label>
-      <input type="number" id="mValor" min="0" step="0.01" onkeypress="if(event.key === 'Enter') salvarManutencao()">
+      <input type="number" id="mValor" min="0" step="0.01" onkeypress="if(event.key === 'Enter') document.getElementById('mObs').focus()">
     </div>
     <div class="field">
       <label>Observação</label>
-      <input type="text" id="mObs" placeholder="Opcional">
+      <input type="text" id="mObs" placeholder="Opcional" onkeypress="if(event.key === 'Enter') salvarManutencao()">
     </div>
     <div class="modal-actions" style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-top: 20px;">
       <div id="infoEdicao" style="font-size: 13px; color: var(--primary); font-weight: 600;"></div>
