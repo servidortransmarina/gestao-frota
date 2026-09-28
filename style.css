@@ -124,7 +124,16 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 .caixa-login { background: var(--card); padding: 40px; border-radius: 12px; width: 100%; max-width: 360px; text-align: center; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2); }
 .caixa-login h2 { color: #111827; margin-top: 0; }
 
-.back { cursor: pointer; color: var(--primary); font-size: 13px; font-weight: 600; margin-bottom: 16px; display: inline-block; }
+/* O NOVO BOTÃO DE VOLTAR DESTAQUE */
+.back-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #374151; color: #ffffff; padding: 12px 20px;
+  border-radius: 8px; font-size: 14px; font-weight: 600;
+  cursor: pointer; margin-bottom: 20px; transition: all 0.2s;
+  border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+.back-btn:hover { background: #1f2937; transform: translateY(-2px); box-shadow: 0 6px 12px rgba(0,0,0,0.15); }
+
 .limitbox { background: #f9fafb; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 10px; }
 
 .alertcard { background: var(--card); border-left: 5px solid var(--danger); border-radius: 8px; padding: 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
@@ -207,7 +216,6 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 /* ================= GRÁFICO VERTICAL DUPLO ================= */
 .chart-vertical-container {
   display: flex; align-items: flex-end; justify-content: flex-start;
-  /* Altura maior e espaço gigante no topo para os números não cortarem */
   height: 380px; padding-top: 130px; padding-bottom: 0;
   border-bottom: 2px solid var(--border); border-left: 2px dashed var(--border);
   margin-bottom: 10px; gap: 24px;
@@ -237,7 +245,6 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
 .bar-col-fill.green { background: var(--success); }
 .bar-col-fill.blue { background: #3b82f6; }
 
-/* Números agora flutuam LIVRES fora da barra e são escuros para leitura perfeita */
 .bar-col-val {
   position: absolute;
   writing-mode: vertical-rl; transform: rotate(180deg);
