@@ -315,13 +315,12 @@ function nomeManutencao(item) {
   return TIPOS[tipo] || item?.tipo || 'Outro';
 }
 
-/* ================= INTELIGÊNCIA: VALIDAÇÃO DO KM (Blindada e Refinada) ================= */
+/* ================= INTELIGÊNCIA: VALIDAÇÃO DO KM (Flexibilizada) ================= */
 function validarSaltoKm(placa, novoKm, dataReferencia, isCorrecaoManual = false) {
   if (isNaN(novoKm) || novoKm <= 0) return { erro: true, msg: 'KM inválido.' };
   const v = db.veiculos.find(x => x.placa === placa);
   if (!v) return null;
 
-  // Usa EXCLUSIVAMENTE o painel atual do veículo para evitar saltos irreais
   const kmAnterior = v.kmAtual; 
   
   if (novoKm < kmAnterior && dataReferencia === hojeISO()) {
@@ -334,8 +333,6 @@ function validarSaltoKm(placa, novoKm, dataReferencia, isCorrecaoManual = false)
   
   if (novoKm > kmAnterior) {
      const diffKm = novoKm - kmAnterior;
-     
-     // Regra de Bom Senso: Só incomoda o motorista com alerta de "Média por dia" se o salto for maior que 2.000 KM
      if (diffKm > 2000) { 
          const ms = db.manutencoes.filter(m => m.placa === placa && m.km > 0).sort((a,b) => new Date(b.data) - new Date(a.data));
          const dataAnterior = ms.length > 0 ? ms[0].data : hojeISO();
@@ -501,9 +498,7 @@ function renderDetalhe() {
   
   const msAll = db.manutencoes.filter(m => m.placa === placa).sort((a, b) => new Date(b.data) - new Date(a.data));
   
-  // O FILTRO UI: Oculta o Registro de KM apenas da tabela visual para não poluir o mecânico
   const msUi = msAll.filter(m => m.descricao !== 'Registro de KM');
-  
   const msReais = msAll.filter(m => m.descricao !== 'Registro de KM');
   const total = msReais.reduce((s, m) => s + m.valor, 0); 
   const agends = db.agendamentos.filter(a => a.placa === placa); const cfg = db.limites[placa];
@@ -521,7 +516,7 @@ function renderDetalhe() {
   const dataHover = ultRegistro ? `Última alteração: ${fmtData(ultRegistro.data)}\nKM: ${fmtKm(ultRegistro.km)}\nResponsável: ${ultRegistro.nome}` : 'Nenhum histórico registrado';
 
   document.getElementById('manutDetalheWrap').innerHTML = `
-    <div class="back" onclick="renderManutTab()">← Voltar para lista de veículos</div>
+    <button class="back-btn" onclick="renderManutTab()">⬅ Voltar para a lista de Caminhões</button>
     <div class="card">
       <div class="row" style="justify-content:space-between; align-items:center;">
         <div class="veiculo-header-info">
@@ -548,11 +543,11 @@ function renderDetalhe() {
       <table id="tabelaHistorico">
         <thead><tr><th>Tipo</th><th>Data</th><th>KM Registrado</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
         <tbody>
-          ${msUi.map(m => `<tr title="👤 Última alteração: ${m.nome || 'Não identificado'}"><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td><div style="font-size: 10px; color: var(--dim); text-transform: uppercase;">Apurado com</div><div style="font-weight: 600;">${fmtKm(m.km)}</div></td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td><td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> <button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button></td></tr>`).join('')}
+          ${msUi.map(m => `<tr title="👤 Última alteração: ${m.nome || 'Não identificado'}"><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td><div style="font-size: 10px; color: var(--dim); text-transform: uppercase;">Apurado com</div><div style="font-weight: 600;">${fmtKm(m.km)}</div></td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td><td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> ${isAdmin ? `<button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button>` : ''}</td></tr>`).join('')}
         </tbody>
       </table>
     </div>
-    ${agends.length ? `<div class="card"><h2>Agendadas</h2><table><thead><tr><th>Tipo</th><th>Previsão</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead><tbody>${agends.map(g => `<tr title="👤 Registrado por: ${g.nome || 'Não identificado'}"><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td><td><button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button> <button class="btn secondary small" onclick="editarAgendamento('${g.id}')">Editar</button> <button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar</button></td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${agends.length ? `<div class="card"><h2>Agendadas</h2><table><thead><tr><th>Tipo</th><th>Previsão</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead><tbody>${agends.map(g => `<tr title="👤 Registrado por: ${g.nome || 'Não identificado'}"><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td><td><button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button> <button class="btn secondary small" onclick="editarAgendamento('${g.id}')">Editar</button> ${isAdmin ? `<button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
   `;
 }
 
@@ -691,6 +686,8 @@ function editarAgendamento(id) {
   onModoChange(); const infoEdicao = document.getElementById('infoEdicao'); infoEdicao.textContent = "👤 Agendado por: " + (ag.nome || "Não identificado"); openModal('modalManut');
 }
 async function excluirManutencao(id) {
+  if (localStorage.getItem("perfilUsuario") === "mecanico") return toast("Acesso negado: Apenas gestores podem excluir.", true);
+  
   const quer = await confirmarCustom('Excluir manutenção', 'Tem certeza que deseja excluir do histórico?');
   if (!quer) return;
   const m = db.manutencoes.find(x => x.id === id); db.manutencoes = db.manutencoes.filter(x => x.id !== id); salvarCache(); renderTelaAtual(); sincronizarAlertas(false); toast('Excluindo...');
@@ -700,7 +697,11 @@ async function excluirManutencao(id) {
     sincronizarAlertas(true); 
   }, 'Erro ao excluir');
 }
-function cancelarAgendamento(id) { db.agendamentos = db.agendamentos.filter(a => a.id !== id); salvarCache(); renderTelaAtual(); toast('Cancelado...'); execBackground(async () => { await apiPost('deleteAgendamento', { id }); }, 'Erro cancelar'); }
+function cancelarAgendamento(id) { 
+  if (localStorage.getItem("perfilUsuario") === "mecanico") return toast("Acesso negado: Apenas gestores podem excluir.", true);
+  
+  db.agendamentos = db.agendamentos.filter(a => a.id !== id); salvarCache(); renderTelaAtual(); toast('Cancelado...'); execBackground(async () => { await apiPost('deleteAgendamento', { id }); }, 'Erro cancelar'); 
+}
 
 /* ================= ABA 3: DASHBOARD ANALÍTICO (R$/KM E CICLOS) ================= */
 
@@ -756,8 +757,14 @@ function renderDashboard() {
       let kmMax = Math.max(0, ...kmsPeriodo);
 
       if (!dtInicioStr && !dtFimStr) {
-          // BIFURCAÇÃO DA INTELIGÊNCIA: Se não houver filtro, mostra a KM ABSOLUTA do painel para o painel Geral.
-          kmRodadoV = v.kmAtual;
+          let maxKmNoHistorico = Math.max(kmMax, v.kmAtual);
+          let todosKms = msV_All.map(m => m.km).filter(k => k > 0);
+          if (todosKms.length > 0) {
+              let minKmNoHistorico = Math.min(...todosKms);
+              if (maxKmNoHistorico > minKmNoHistorico) {
+                  kmRodadoV = maxKmNoHistorico - minKmNoHistorico;
+              }
+          }
       } else {
           if (kmsPeriodo.length > 0) {
               let msV_Ant_Validos = msV_Ant.map(m => m.km).filter(k => k > 0);
@@ -923,15 +930,25 @@ function toggleSecaoAlerta(header, secaoId) {
 }
 function grupoAlerta(a) { if (a.status === 'resolvido') return 'resolvido'; if (a.status === 'analise') return 'andamento'; const ag = db.agendamentos.find(ag => ag.placa === a.placa && ag.tipo === a.tipo); return (!ag || (ag.dataPrevista && ag.dataPrevista < hojeLocal())) ? 'atrasado' : 'pendente'; }
 function dataCriacaoAlertaTs(a) { const p = String(a.id || '').split('_'); if (p.length >= 2) { const ts = parseInt(p[1], 36); if (!isNaN(ts)) return ts; } return Date.now(); }
+
 function montarCardAlerta(a) {
   const v = db.veiculos.find(x => x.placa === a.placa), km = v ? fmtKm(v.kmAtual) : '-', grp = grupoAlerta(a);
-  let btn = grp === 'resolvido' ? `<button class="btn small secondary" onclick="reativarResolvido('${a.id}')">Reabrir</button><button class="btn small danger" onclick="excluirManutencao('${a.id}')">Excluir</button>` :
+  const isAdmin = (localStorage.getItem("perfilUsuario") || "admin") !== "mecanico";
+  let btn = grp === 'resolvido' ? `<button class="btn small secondary" onclick="reativarResolvido('${a.id}')">Reabrir</button>${isAdmin ? `<button class="btn small danger" onclick="excluirManutencao('${a.id}')">Excluir</button>` : ''}` :
             grp === 'andamento' ? `<button class="btn small" onclick="marcarResolvido('${a.id}')">Resolvido</button><button class="btn small secondary" onclick="reabrirAlerta('${a.id}')">Voltar</button>` :
             `<button class="btn small secondary" onclick="marcarAnalise('${a.id}')">Em andamento</button><button class="btn small" onclick="marcarResolvido('${a.id}')">Resolvido</button>`;
   return `<div class="alert-card ${grp}"><div class="alert-info"><div class="alert-title">${a.placa} — ${nomeTipo(a.tipo)}</div><div class="alert-sub">Km: ${km}</div></div><div class="alert-actions">${btn}</div></div>`;
 }
-function montarCardAgAtrasado(ag) { return `<div class="alert-card atrasado"><div class="alert-info"><div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div><div class="alert-sub" style="color:var(--danger); font-weight:bold;">⚠️ Atrasado: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div></div><div class="alert-actions"><button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button><button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button><button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button></div></div>`; }
-function montarCardAgPendente(ag) { return `<div class="alert-card pendente"><div class="alert-info"><div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div><div class="alert-sub">Agendado para: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div></div><div class="alert-actions"><button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button><button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button><button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button></div></div>`; }
+
+function montarCardAgAtrasado(ag) { 
+    const isAdmin = (localStorage.getItem("perfilUsuario") || "admin") !== "mecanico";
+    return `<div class="alert-card atrasado"><div class="alert-info"><div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div><div class="alert-sub" style="color:var(--danger); font-weight:bold;">⚠️ Atrasado: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div></div><div class="alert-actions"><button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button><button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button><button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button></div></div>`; 
+}
+
+function montarCardAgPendente(ag) { 
+    const isAdmin = (localStorage.getItem("perfilUsuario") || "admin") !== "mecanico";
+    return `<div class="alert-card pendente"><div class="alert-info"><div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div><div class="alert-sub">Agendado para: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div></div><div class="alert-actions"><button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button><button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button><button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button></div></div>`; 
+}
 
 function renderAlertas() {
   const s = document.getElementById('tab-alertas'); if (!s) return; 
@@ -950,7 +967,11 @@ function renderAlertas() {
   const g = { atrasado: [], pendente: [], andamento: [], resolvido: [] };
   baseAlertas.forEach(a => g[grupoAlerta(a)].push(a));
   
-  const resolvidosComputados = db.manutencoes.map(m => ({ id: m.id, placa: m.placa, tipo: m.tipo === 'outro' ? m.descricao : m.tipo, status: 'resolvido', dataResolucao: m.data }));
+  // AQUI FOI APLICADO O FILTRO: Exclui as atualizações silenciosas da aba de alertas
+  const resolvidosComputados = db.manutencoes
+      .filter(m => m.descricao !== 'Registro de KM')
+      .map(m => ({ id: m.id, placa: m.placa, tipo: m.tipo === 'outro' ? m.descricao : m.tipo, status: 'resolvido', dataResolucao: m.data }));
+      
   g.resolvido = resolvidosComputados.sort((a,b) => new Date(b.dataResolucao) - new Date(a.dataResolucao));
   if (termo) g.resolvido = g.resolvido.filter(a => a.placa.includes(termo));
 
