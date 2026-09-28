@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"> 
 <title>Manutenção dos Veículos</title>
-<link rel="icon" type="image/png" href="./logotrm.png?v=3">
-<link rel="stylesheet" href="./style.css?v=3">
+<link rel="icon" type="image/png" href="./logotrm.png?v=8">
+<link rel="stylesheet" href="./style.css?v=7">
 </head>
 <body>
 
@@ -23,35 +23,17 @@
 </header>
 
 <nav>
-  <button class="navbtn active" data-tab="cadastro">Cadastro de Veículos</button>
-  <button class="navbtn" data-tab="manutencao">Manutenção</button>
-  <button class="navbtn" data-tab="dashboard">Dashboard</button>
+  <button class="navbtn active" data-tab="manutencao">Frota & Manutenções</button>
+  <button class="navbtn" data-tab="dashboard">Dashboard Analítico</button>
   <button class="navbtn" data-tab="alertas">Alertas <span id="alertBadge"></span></button>
+  <button class="navbtn" data-tab="aprovacoes" id="tabBtnAprovacoes" style="display:none;">Aprovações <span id="badgeAprovacoes" class="badge red" style="display:none;">0</span></button>
 </nav>
 
 <main>
-<section id="tab-cadastro" class="tab active">
-  <div class="card">
-    <h2>Cadastrar novo veículo</h2>
-    <div class="row">
-      <div class="field" style="flex:1;">
-        <label>Placa do veículo</label>
-        <input id="inputPlaca" placeholder="Ex: ABC1234 ou ABC1D23" maxlength="8" onkeypress="if(event.key === 'Enter') cadastrarVeiculo()">
-        <small class="errmsg" id="errPlaca"></small>
-      </div>
-      <button class="btn" id="btnCadastrarVeiculo" onclick="cadastrarVeiculo()">Cadastrar</button>
-    </div>
-  </div>
-  <div class="card">
-    <h2>Veículos cadastrados</h2>
-    <div id="listaCadastro"></div>
-  </div>
-</section>
-
-<section id="tab-manutencao" class="tab">
+<section id="tab-manutencao" class="tab active">
   <div id="manutListaWrap">
     <div class="card">
-      <h2>Selecione um veículo</h2>
+      <h2>Veículos da Frota</h2>
       <div id="chipsVeiculos"></div>
     </div>
   </div>
@@ -60,27 +42,47 @@
 
 <section id="tab-dashboard" class="tab">
   <div class="card">
-    <div class="row">
+    <div class="row" style="align-items: center;">
       <div class="field">
         <label>Veículo</label>
         <select id="dashVeiculo" onchange="renderDashboard()"><option value="todos">Todos os veículos</option></select>
       </div>
       <div class="field">
-        <label>Período</label>
-        <select id="dashPeriodo" onchange="renderDashboard()">
-          <option value="todos">Todo o período</option>
-          <option value="mes">Este mês</option>
-          <option value="3m">Últimos 3 meses</option>
-          <option value="6m">Últimos 6 meses</option>
-          <option value="12m">Últimos 12 meses</option>
-        </select>
+        <label>Data Início</label>
+        <input type="date" id="dashDataInicio" onchange="renderDashboard()">
+      </div>
+      <div class="field">
+        <label>Data Fim</label>
+        <input type="date" id="dashDataFim" onchange="renderDashboard()">
+      </div>
+      <div class="field" style="margin-bottom: 2px;">
+        <button class="btn secondary" style="padding: 10px 14px;" onclick="limparFiltroDatasDashboard()">Limpar Período</button>
       </div>
     </div>
   </div>
+  
   <div class="grid-cards" id="dashKpis"></div>
+  
   <div class="card">
-    <h2>Gasto total por veículo</h2>
-    <div id="dashChart"></div>
+    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom: 10px;">
+      <h2 style="margin:0;">Relação: Custo x Distância por Caminhão</h2>
+      <div style="display:flex; gap: 15px;">
+         <div style="display:flex; align-items:center; gap:5px;"><div style="width:12px;height:12px;background:var(--success);border-radius:2px;"></div> <span style="font-size:12px;font-weight:600;color:var(--dim)">Gasto (R$)</span></div>
+         <div style="display:flex; align-items:center; gap:5px;"><div style="width:12px;height:12px;background:#3b82f6;border-radius:2px;"></div> <span style="font-size:12px;font-weight:600;color:var(--dim)">Rodagem (km)</span></div>
+      </div>
+    </div>
+    
+    <div id="dashChartVertical"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom: 15px;">
+      <h2 style="margin:0;">Média de Repetição por Serviço / Peça</h2>
+      <div class="field" style="min-width:220px; margin:0;">
+        <select id="dashFiltroCiclo" onchange="renderDashboardCiclos()"></select>
+      </div>
+    </div>
+    <div id="dashCiclosTabela"></div>
   </div>
 </section>
 
@@ -90,9 +92,16 @@
     <div id="alertasLista"></div>
   </div>
 </section>
+
+<section id="tab-aprovacoes" class="tab">
+  <div class="card">
+    <h2>Cadastros Aguardando Aprovação</h2>
+    <div id="listaAprovacoes"></div>
+  </div>
+</section>
 </main>
 
-<!-- TELA DE LOGIN (BLOQUEIA O SITE) -->
+<!-- Modais do sistema... -->
 <div class="overlay login-overlay" id="telaLoginOverlay">
   <div class="caixa-login">
       <div style="text-align: center; margin-bottom: 25px;">
@@ -100,14 +109,11 @@
         <h2 style="margin: 0;">Faça login</h2>
       </div>
 
-    <!-- BLOCO DE LOGIN -->
     <div id="formLogin">
       <div class="field" style="margin-bottom: 15px; text-align: left;">
-        <!-- autocomplete="off" bloqueia o preenchimento indevido do usuário -->
         <input type="text" id="inputUsuario" placeholder="Usuário (ex: JoaoPaulo)" autocomplete="off" onkeypress="if(event.key === 'Enter') document.getElementById('inputSenha').focus()">
       </div>
       <div class="field" style="margin-bottom: 20px; text-align: left;">
-        <!-- autocomplete="new-password" força o Chrome a não sugerir senhas velhas -->
         <input type="password" id="inputSenha" placeholder="Senha" autocomplete="new-password" onkeypress="if(event.key === 'Enter') fazerLogin()">
       </div>
       <button class="btn" id="btnLogin" onclick="fazerLogin()" style="width: 100%; font-size:15px; padding:12px;">Entrar</button>
@@ -116,13 +122,12 @@
       </p>
     </div>
 
-    <!-- BLOCO DE CADASTRO (Escondido por padrão) -->
     <div id="formCadastro" style="display: none;">
       <div class="field" style="margin-bottom: 15px; text-align: left;">
-        <input type="text" id="cadNome" placeholder="Seu Nome e Sobrenome" autocomplete="off">
+        <input type="text" id="cadNome" placeholder="Seu Nome e Sobrenome" autocomplete="off" onkeypress="if(event.key === 'Enter') document.getElementById('cadUsuario').focus()">
       </div>
       <div class="field" style="margin-bottom: 15px; text-align: left;">
-        <input type="text" id="cadUsuario" placeholder="Escolha um Usuário (ex: LuisArtur)" autocomplete="off">
+        <input type="text" id="cadUsuario" placeholder="Escolha um Usuário (ex: LuisArtur)" autocomplete="off" onkeypress="if(event.key === 'Enter') document.getElementById('cadSenha').focus()">
       </div>
       <div class="field" style="margin-bottom: 20px; text-align: left;">
         <input type="password" id="cadSenha" placeholder="Crie uma Senha" autocomplete="new-password" onkeypress="if(event.key === 'Enter') solicitarAcesso()"> 
@@ -132,19 +137,46 @@
         <a href="#" onclick="mostrarLogin()" style="color: var(--dim); text-decoration: none;">← Voltar para o Login</a>
       </p>
     </div>
-
     <p id="mensagemErro" class="errmsg" style="display:none; text-align: center; margin-top: 15px;"></p>
   </div>
 </div>
 
-<!-- MODAIS GERAIS -->
+<div class="overlay" id="modalCadVeiculo">
+  <div class="modal">
+    <h3>Adicionar Novo Caminhão</h3>
+    <div class="field" style="margin-bottom:20px; margin-top:15px;">
+      <label>Placa do veículo *</label>
+      <input id="inputPlaca" placeholder="Ex: ABC1234 ou ABC1D23" maxlength="8" onkeypress="if(event.key === 'Enter') cadastrarVeiculo()">
+      <small class="errmsg" id="errPlaca"></small>
+    </div>
+    <div class="modal-actions">
+      <button class="btn secondary" onclick="closeModal('modalCadVeiculo')">Cancelar</button>
+      <button class="btn" onclick="cadastrarVeiculo()">Salvar Veículo</button>
+    </div>
+  </div>
+</div>
+
 <div class="overlay" id="modalConfirm">
   <div class="modal">
     <h3 id="confirmTitle">Confirmar</h3>
-    <p id="confirmMsg" style="color:var(--dim);"></p>
+    <p id="confirmMsg" style="color:var(--dim); white-space: pre-wrap; margin-bottom: 15px; font-size: 14px;"></p>
     <div class="modal-actions">
-      <button class="btn secondary" onclick="closeModal('modalConfirm')">Cancelar</button>
+      <button class="btn secondary" id="confirmCancelBtn">Cancelar</button>
       <button class="btn danger" id="confirmBtn">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="modalPrompt">
+  <div class="modal">
+    <h3 id="promptTitle">Título</h3>
+    <p id="promptMsg" style="color:var(--dim); white-space: pre-wrap; margin-bottom: 15px; font-size: 14px;"></p>
+    <div class="field">
+      <input type="text" inputmode="numeric" id="promptInput" placeholder="Digite o KM..." onkeypress="if(event.key === 'Enter') document.getElementById('promptBtnOk').click()">
+    </div>
+    <div class="modal-actions" style="margin-top: 20px;">
+      <button class="btn secondary" id="promptBtnCancel">Cancelar</button>
+      <button class="btn" id="promptBtnOk">Confirmar</button>
     </div>
   </div>
 </div>
@@ -160,10 +192,9 @@
       </select>
     </div>
     
-    <!-- NOVO MOTOR INTELIGENTE -->
     <div class="field">
-      <label>Qual manutenção será feita? *</label>
-      <input type="text" id="mTipoInput" list="listaServicos" placeholder="Ex: Alinhamento, Troca de óleo motor, Pastilha..." onkeypress="if(event.key === 'Enter') document.getElementById('mKm').focus()">
+      <label>Qual serviço ou peça? *</label>
+      <input type="text" id="mTipoInput" list="listaServicos" placeholder="Ex: Alinhamento, Bomba D'água, Pastilha..." onkeypress="if(event.key === 'Enter') document.getElementById('mKm').focus()">
       <datalist id="listaServicos">
         <option value="Alinhamento">
         <option value="Troca de óleo do motor">
@@ -172,7 +203,6 @@
       </datalist>
     </div>
 
-    <!-- O KM AGORA É FIXO E SEMPRE APARECE -->
     <div class="row">
       <div class="field">
         <label>Km atual (obrigatório)</label>
@@ -189,8 +219,8 @@
       </div>
     </div>
     <div class="field">
-      <label>Valor (R$)</label>
-      <input type="number" id="mValor" min="0" step="0.01" onkeypress="if(event.key === 'Enter') document.getElementById('mObs').focus()">
+      <label>Valor Gasto (R$)</label>
+      <input type="text" inputmode="decimal" id="mValor" placeholder="Ex: 1500,50" onkeypress="if(event.key === 'Enter') document.getElementById('mObs').focus()">
     </div>
     <div class="field">
       <label>Observação</label>
@@ -224,6 +254,6 @@
 <div class="toast" id="toast"></div>
 <div class="loading-overlay" id="loadingOverlay">Carregando dados da planilha...</div>
 
-<script src="./script.js?v=3"></script>
+<script src="./script.js?v=8"></script>
 </body>
 </html>
