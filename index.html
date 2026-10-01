@@ -63,23 +63,26 @@
   
   <div class="grid-cards" id="dashKpis"></div>
   
-  <div class="card">
-    <div class="row" style="justify-content:space-between; align-items:center; margin-bottom: 10px;">
-      <h2 style="margin:0;">Relação: Custo x Distância por Caminhão</h2>
-      <div style="display:flex; gap: 15px;">
-         <div style="display:flex; align-items:center; gap:5px;"><div style="width:12px;height:12px;background:var(--success);border-radius:2px;"></div> <span style="font-size:12px;font-weight:600;color:var(--dim)">Gasto (R$)</span></div>
-         <div style="display:flex; align-items:center; gap:5px;"><div style="width:12px;height:12px;background:#3b82f6;border-radius:2px;"></div> <span style="font-size:12px;font-weight:600;color:var(--dim)">Rodagem (km)</span></div>
+  <div class="row" style="justify-content:space-between; align-items:center; margin-bottom: 10px;">
+      <h2 style="margin:0;">Relação: Custo x Rodagem por Caminhão</h2>
+      <div class="legenda-grafico" style="margin-left: auto;">
+        <div class="legenda-item"><div class="legenda-cor fifa-office"></div>Oficina (R$)</div>
+        <div class="legenda-item"><div class="legenda-cor fifa-fuel"></div>Combustível (R$)</div>
+        <div class="legenda-item"><div class="legenda-cor fifa-km"></div>Rodagem (km)</div>
       </div>
-    </div>
-    
+  </div>
+
+  <div class="card">
     <div id="dashChartVertical"></div>
   </div>
 
   <div class="card">
     <div class="row" style="justify-content:space-between; align-items:center; margin-bottom: 15px;">
       <h2 style="margin:0;">Média de Repetição por Serviço / Peça</h2>
-      <div class="field" style="min-width:220px; margin:0;">
-        <select id="dashFiltroCiclo" onchange="renderDashboardCiclos()"></select>
+      <div class="field" style="min-width:260px; margin:0;">
+        <select id="dashFiltroCiclo" onchange="calcularCicloServico(this.value)">
+          <option value="">Selecione um serviço ou peça...</option>
+        </select>
       </div>
     </div>
     <div id="dashCiclosTabela"></div>
