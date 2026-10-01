@@ -4,11 +4,11 @@ const API_URL = "https://script.google.com/macros/s/AKfycbylesg0ZL8qLXqQ7igUSJ3d
 let db = { veiculos: [], manutencoes: [], limites: {}, alertas: [], agendamentos: [], pendentes: [] };
 let carregando = false;
 
-const TIPOS = { oleo: 'Troca de óleo', alinhamento: 'Alinhamento', oleo_caixa: 'Troca de óleo da caixa', oleo_diferencial: 'Troca de óleo do diferencial' };
+const TIPOS = { oleo: 'Troca de óleo do motor', alinhamento: 'Alinhamento', oleo_caixa: 'Troca de óleo da caixa', oleo_diferencial: 'Troca de óleo do diferencial' };
 const TIPOS_RASTREADOS = ['oleo', 'alinhamento', 'oleo_caixa', 'oleo_diferencial'];
 const LIMITES_PADRAO = { oleo: { modo: 'km_e_meses', km: 15000, meses: 12 }, alinhamento: { modo: 'km_e_meses', km: 20000, meses: 6 }, oleo_caixa: { modo: 'km_e_meses', km: 100000, meses: 24 }, oleo_diferencial: { modo: 'km_e_meses', km: 100000, meses: 24 } };
-const LABEL_ULTIMA = { oleo: 'Última troca de óleo', alinhamento: 'Último alinhamento', oleo_caixa: 'Último óleo da caixa', oleo_diferencial: 'Último óleo do diferencial' };
-const CACHE_KEY = 'frotaCacheV9';
+const LABEL_ULTIMA = { oleo: 'Último óleo do motor', alinhamento: 'Último alinhamento', oleo_caixa: 'Último óleo da caixa', oleo_diferencial: 'Último óleo do diferencial' };
+const CACHE_KEY = 'frotaCacheV13';
 
 function salvarCache() { try { localStorage.setItem(CACHE_KEY, JSON.stringify(db)); } catch(e) {} }
 
@@ -70,11 +70,20 @@ function liberarAcesso(nome, perfil) {
     document.querySelector('.navbtn[data-tab="dashboard"]').style.display = 'inline-block';
   }
   
-  document.getElementById("tabBtnAprovacoes").style.display = (perfil === 'master') ? 'inline-block' : 'none';
-  if (perfil === 'master' && db.pendentes && db.pendentes.length > 0) {
-    const badge = document.getElementById('badgeAprovacoes');
-    badge.textContent = db.pendentes.length;
-    badge.style.display = 'inline-block';
+  const btnAprovacoes = document.getElementById("tabBtnAprovacoes");
+  const badge = document.getElementById('badgeAprovacoes');
+  
+  if (perfil === 'master') {
+    btnAprovacoes.style.display = 'inline-block';
+    if (db.pendentes && db.pendentes.length > 0) {
+      badge.textContent = db.pendentes.length;
+      badge.style.display = 'inline-block';
+    } else {
+      badge.style.display = 'none';
+    }
+  } else {
+    btnAprovacoes.style.display = 'none';
+    if (badge) badge.style.display = 'none';
   }
   
   document.querySelector('.navbtn[data-tab="manutencao"]').click();
@@ -315,7 +324,7 @@ function nomeManutencao(item) {
   return TIPOS[tipo] || item?.tipo || 'Outro';
 }
 
-/* ================= INTELIGÊNCIA: VALIDAÇÃO DO KM (Flexibilizada) ================= */
+/* ================= INTELIGÊNCIA: VALIDAÇÃO DO KM ================= */
 function validarSaltoKm(placa, novoKm, dataReferencia, isCorrecaoManual = false) {
   if (isNaN(novoKm) || novoKm <= 0) return { erro: true, msg: 'KM inválido.' };
   const v = db.veiculos.find(x => x.placa === placa);
@@ -373,13 +382,25 @@ async function atualizarManualmente() {
 /* ================= ABA APROVAÇÕES MASTER ================= */
 function renderAprovacoes() {
   const el = document.getElementById('listaAprovacoes');
-  if (!db.pendentes || db.pendentes.length === 0) { el.innerHTML = '<div class="empty">Nenhum cadastro pendente.</div>'; return; }
+  const badge = document.getElementById('badgeAprovacoes');
+  
+  if (!db.pendentes || db.pendentes.length === 0) { 
+    el.innerHTML = '<div class="empty">Nenhum cadastro pendente.</div>'; 
+    if (badge) badge.style.display = 'none'; 
+    return; 
+  }
+  
   let html = '<table><thead><tr><th>Nome</th><th>Usuário</th><th>Ações</th></tr></thead><tbody>';
   db.pendentes.forEach(p => {
     html += `<tr><td>${p.nome}</td><td>${p.usuario}</td><td><select id="perfil_${p.usuario}" style="width: auto; display: inline-block; padding: 4px; margin-right: 8px;"><option value="mecanico">Mecânico</option><option value="admin">Admin</option><option value="master">Master</option></select><button class="btn success small" onclick="aprovarUsu('${p.usuario}')">Aprovar</button> <button class="btn danger small" onclick="recusarUsu('${p.usuario}')">Recusar</button></td></tr>`;
   });
-  html += '</tbody></table>'; el.innerHTML = html;
-  const badge = document.getElementById('badgeAprovacoes'); badge.textContent = db.pendentes.length; badge.style.display = 'inline-block';
+  html += '</tbody></table>'; 
+  el.innerHTML = html;
+  
+  if (badge) {
+      badge.textContent = db.pendentes.length; 
+      badge.style.display = 'inline-block';
+  }
 }
 
 async function aprovarUsu(usuario) {
@@ -497,7 +518,6 @@ function renderDetalhe() {
   garantirLimites(placa); 
   
   const msAll = db.manutencoes.filter(m => m.placa === placa).sort((a, b) => new Date(b.data) - new Date(a.data));
-  
   const msUi = msAll.filter(m => m.descricao !== 'Registro de KM');
   const msReais = msAll.filter(m => m.descricao !== 'Registro de KM');
   const total = msReais.reduce((s, m) => s + m.valor, 0); 
@@ -505,8 +525,32 @@ function renderDetalhe() {
   
   const proximoLimiteTexto = (tipo) => {
     const info = calcularLimite(placa, tipo); if (!info || !info.temUltima) return 'Sem histórico';
-    if (info.limiteKm !== null) { const falta = info.limiteKm - v.kmAtual; return falta >= 0 ? `${fmtKm(info.limiteKm)} (faltam ${fmtKm(falta)})` : `${fmtKm(info.limiteKm)} (excedido há ${fmtKm(-falta)})`; }
-    return info.limiteData !== null ? fmtData(info.limiteData) : '-';
+    
+    let txtKm = '';
+    let txtData = '';
+    
+    if (info.limiteKm !== null) {
+        const faltaKm = info.limiteKm - v.kmAtual;
+        txtKm = faltaKm >= 0 ? `${fmtKm(info.limiteKm)} (faltam ${fmtKm(faltaKm)})` : `${fmtKm(info.limiteKm)} (excedido há ${fmtKm(-faltaKm)})`;
+    }
+    
+    if (info.limiteData !== null) {
+        const hojeObj = new Date(hojeISO() + 'T00:00:00');
+        const limiteObj = new Date(info.limiteData + 'T00:00:00');
+        const diffDias = Math.round((limiteObj - hojeObj) / (1000 * 60 * 60 * 24));
+        
+        if (diffDias >= 0) {
+            txtData = `${fmtData(info.limiteData)} (faltam ${diffDias} dias)`;
+        } else {
+            txtData = `${fmtData(info.limiteData)} (excedido há ${-diffDias} dias)`;
+        }
+    }
+    
+    if (info.cfg.modo === 'km') return txtKm;
+    if (info.cfg.modo === 'meses') return txtData;
+    
+    if (txtKm && txtData) return `${txtKm} ou ${txtData}`;
+    return txtKm || txtData || '-';
   };
   const cardsTipos = TIPOS_RASTREADOS.map(t => { const ult = ultimaManut(placa, t); return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult ? fmtData(ult.data) + ' · ' + fmtKm(ult.km) : 'Sem registro'}</div></div>`; }).join('');
   const perfil = localStorage.getItem("perfilUsuario") || "admin"; const isAdmin = perfil !== "mecanico";
@@ -711,27 +755,79 @@ window.limparFiltroDatasDashboard = function() {
   renderDashboard();
 }
 
-function preencherFiltroCiclo() {
-  const select = document.getElementById('dashFiltroCiclo');
-  if (!select) return;
-  const mapaTipos = {};
-  Object.values(TIPOS).forEach(t => mapaTipos[normPeca(t)] = t);
-  
-  db.manutencoes.forEach(m => {
-     const t = m.tipo === 'outro' ? m.descricao : TIPOS[m.tipo] || m.tipo;
-     if (t && t.trim() !== '' && t !== 'Registro de KM') {
-         const chave = normPeca(t);
-         if (!mapaTipos[chave]) mapaTipos[chave] = t.trim(); 
-     }
-  });
-  const arrValores = Object.values(mapaTipos).sort();
-  const valorAtual = select.value;
-  select.innerHTML = arrValores.map(t => `<option value="${t}">${t}</option>`).join('');
-  if (arrValores.includes(valorAtual)) select.value = valorAtual;
+/**
+ * Estima a distância rodada em um intervalo.
+ * Entre duas leituras de odômetro, distribui a diferença uniformemente
+ * pelos dias decorridos.
+ */
+function estimarKmNoPeriodo(veiculo, manutencoes, inicioISO, fimISO) {
+  const leiturasPorData = new Map();
+
+  manutencoes
+    .filter(m => m.placa === veiculo.placa && Number(m.km) > 0 && m.data)
+    .forEach(m => {
+      const km = Number(m.km);
+      const kmExistente = leiturasPorData.get(m.data);
+      if (kmExistente === undefined || km > kmExistente) {
+        leiturasPorData.set(m.data, km);
+      }
+    });
+
+  const hoje = hojeLocal();
+  const kmAtual = Number(veiculo.kmAtual) || 0;
+  const kmNaDataDeHoje = leiturasPorData.get(hoje) || 0;
+
+  if (kmAtual > 0 && kmAtual > kmNaDataDeHoje) {
+    leiturasPorData.set(hoje, kmAtual);
+  }
+
+  const leituras = [...leiturasPorData.entries()]
+    .map(([data, km]) => ({ data, km, dia: new Date(`${data}T00:00:00`) }))
+    .sort((a, b) => a.dia - b.dia);
+
+  if (leituras.length < 2) {
+    return { km: 0, diasCobertos: 0 };
+  }
+
+  const inicio = new Date(`${inicioISO}T00:00:00`);
+  const fimExclusivo = new Date(`${fimISO}T00:00:00`);
+  fimExclusivo.setDate(fimExclusivo.getDate() + 1);
+
+  let kmEstimado = 0;
+  let diasCobertos = 0;
+
+  for (let i = 1; i < leituras.length; i++) {
+    const anterior = leituras[i - 1];
+    const atual = leituras[i];
+
+    const diasEntreLeituras = (atual.dia - anterior.dia) / (24 * 60 * 60 * 1000);
+
+    if (diasEntreLeituras <= 0 || atual.km <= anterior.km) continue;
+
+    const inicioSobreposto = Math.max(inicio.getTime(), anterior.dia.getTime());
+    const fimSobreposto = Math.min(fimExclusivo.getTime(), atual.dia.getTime());
+
+    if (fimSobreposto <= inicioSobreposto) continue;
+
+    const diasSobrepostos = (fimSobreposto - inicioSobreposto) / (24 * 60 * 60 * 1000);
+    const kmEntreLeituras = atual.km - anterior.km;
+    const kmPorDia = kmEntreLeituras / diasEntreLeituras;
+
+    kmEstimado += kmPorDia * diasSobrepostos;
+    diasCobertos += diasSobrepostos;
+  }
+
+  return {
+    km: Math.round(kmEstimado),
+    diasCobertos: Math.round(diasCobertos * 100) / 100
+  };
 }
 
+/* ================= ABA 3: DASHBOARD ANALÍTICO (FUNÇÃO ÚNICA BLINDADA) ================= */
 function renderDashboard() {
-  const sel = document.getElementById('dashVeiculo'), atual = sel ? sel.value : 'todos'; sel.innerHTML = '<option value="todos">Todos os veículos</option>' + db.veiculos.map(v => `<option value="${v.placa}">${v.placa}</option>`).join(''); if ([...sel.options].some(o => o.value === atual)) sel.value = atual;
+  const sel = document.getElementById('dashVeiculo'), atual = sel ? sel.value : 'todos'; 
+  sel.innerHTML = '<option value="todos">Todos os veículos</option>' + db.veiculos.map(v => `<option value="${v.placa}">${v.placa}</option>`).join(''); 
+  if ([...sel.options].some(o => o.value === atual)) sel.value = atual;
   const veiculo = sel.value;
   
   const dtInicioStr = document.getElementById('dashDataInicio').value;
@@ -741,66 +837,81 @@ function renderDashboard() {
   let limiteFim = dtFimStr ? new Date(dtFimStr + 'T23:59:59') : new Date('2100-01-01T23:59:59');
 
   let maxGasto = 500, maxKm = 500; 
+  let kmEstimadoGeral = 0;
+  let diasCobertosGeral = 0;
   const chartData = [];
-  let gastoGeral = 0, manutGeral = 0, kmGeral = 0;
+  
+  let gastoGeral = 0, manutGeral = 0, kmGeralMatematica = 0, litrosGerais = 0;
 
   db.veiculos.forEach(v => {
       let msV_All = db.manutencoes.filter(m => m.placa === v.placa).sort((a,b) => new Date(a.data) - new Date(b.data));
       let msV_Per = msV_All.filter(m => { let d = new Date(m.data + 'T00:00:00'); return d >= limiteInicio && d <= limiteFim; });
-      let msV_Ant = msV_All.filter(m => { let d = new Date(m.data + 'T00:00:00'); return d < limiteInicio; });
       
-      let gastoV = msV_Per.reduce((s, m) => s + m.valor, 0);
-      let qtdeV = msV_Per.filter(m => m.descricao !== 'Registro de KM').length;
-      let kmRodadoV = 0;
+      let gastoComb = 0, gastoOfic = 0;
+      msV_Per.forEach(m => {
+          if (m.tipo === 'abastecimento') {
+              gastoComb += Number(m.valor) || 0;
+              const lMatch = m.observacao.match(/Qtd:\s*([\d.]+)\s*L/);
+              if (lMatch) litrosGerais += parseFloat(lMatch[1]);
+          } else if (m.descricao !== 'Registro de KM') {
+              gastoOfic += Number(m.valor) || 0;
+          }
+      });
+      let gastoTotalV = gastoComb + gastoOfic;
+      let qtdeV = msV_Per.filter(m => m.descricao !== 'Registro de KM' && m.tipo !== 'abastecimento').length;
       
-      let kmsPeriodo = msV_Per.map(m => m.km).filter(k => k > 0);
-      let kmMax = Math.max(0, ...kmsPeriodo);
+      const inicioPeriodoISO = dtInicioStr || (msV_All.find(m => Number(m.km) > 0 && m.data)?.data || hojeLocal());
+      const fimPeriodoISO = dtFimStr || hojeLocal();
 
-      if (!dtInicioStr && !dtFimStr) {
-          let maxKmNoHistorico = Math.max(kmMax, v.kmAtual);
-          let todosKms = msV_All.map(m => m.km).filter(k => k > 0);
-          if (todosKms.length > 0) {
-              let minKmNoHistorico = Math.min(...todosKms);
-              if (maxKmNoHistorico > minKmNoHistorico) {
-                  kmRodadoV = maxKmNoHistorico - minKmNoHistorico;
-              }
-          }
-      } else {
-          if (kmsPeriodo.length > 0) {
-              let msV_Ant_Validos = msV_Ant.map(m => m.km).filter(k => k > 0);
-              let kmBase = msV_Ant_Validos.length > 0 ? Math.max(...msV_Ant_Validos) : Math.min(...kmsPeriodo);
-              if (kmMax > kmBase) {
-                  kmRodadoV = kmMax - kmBase;
-              }
-          }
+      let estimativa = { km: 0, diasCobertos: 0 };
+      try {
+          estimativa = estimarKmNoPeriodo(v, db.manutencoes, inicioPeriodoISO, fimPeriodoISO);
+      } catch(e) {
+          console.error(e);
       }
 
-      if (gastoV > maxGasto) maxGasto = gastoV;
-      if (kmRodadoV > maxKm) maxKm = kmRodadoV;
+      const distanciaReal = Number(estimativa.km) || 0;
+      const kmRodadoGrafico = (!dtInicioStr && !dtFimStr) ? (Number(v.kmAtual) || 0) : distanciaReal;
+
+      if (gastoTotalV > maxGasto) maxGasto = gastoTotalV;
+      if (kmRodadoGrafico > maxKm) maxKm = kmRodadoGrafico;
 
       if (veiculo === 'todos' || v.placa === veiculo) {
-          gastoGeral += gastoV; manutGeral += qtdeV; kmGeral += kmRodadoV;
-          if (gastoV > 0 || kmRodadoV > 0 || msV_Per.length > 0) {
-              chartData.push({ placa: v.placa, gasto: gastoV, km: kmRodadoV });
+          kmEstimadoGeral += distanciaReal;
+          diasCobertosGeral += (Number(estimativa.diasCobertos) || 0);
+          gastoGeral += gastoTotalV; 
+          manutGeral += qtdeV; 
+          kmGeralMatematica += distanciaReal; 
+          
+          if (gastoTotalV > 0 || kmRodadoGrafico > 0 || msV_Per.length > 0 || (!dtInicioStr && !dtFimStr)) {
+              chartData.push({ placa: v.placa, gastoTotal: gastoTotalV, gastoComb: gastoComb, gastoOfic: gastoOfic, km: kmRodadoGrafico });
           }
       }
   });
 
   let chartHTML = `<div class="chart-vertical-container">`;
+  
   chartData.forEach(d => {
-      let hGasto = d.gasto > 0 ? Math.max((d.gasto / maxGasto) * 100, 2) : 0; 
-      let hKm = d.km > 0 ? Math.max((d.km / maxKm) * 100, 2) : 0;
-
+      let hTotal = (d.gastoTotal > 0 && maxGasto > 0) ? Math.max((d.gastoTotal / maxGasto) * 100, 2) : 0;
+      let ratioComb = d.gastoTotal > 0 ? (d.gastoComb / d.gastoTotal) : 0;
+      let ratioOfic = d.gastoTotal > 0 ? (d.gastoOfic / d.gastoTotal) : 0;
+      let hComb = hTotal * ratioComb;
+      let hOficina = hTotal * ratioOfic;
+      let hKm = (d.km > 0 && maxKm > 0) ? Math.max((d.km / maxKm) * 100, 2) : 0;
+      
       chartHTML += `
       <div class="bar-group-wrapper">
         <div class="bar-group">
-          <div class="bar-track" title="Gasto: ${fmtMoeda(d.gasto)}">
-            ${d.gasto > 0 ? `<div class="bar-col-val" style="bottom: calc(${hGasto}\% + 5px)">${fmtMoeda(d.gasto)}</div>` : ''}
-            <div class="bar-col-fill green" style="height:${hGasto}%"></div>
+          <!-- COLUNA 1: FINANCEIRA EMPILHADA -->
+          <div class="bar-track">
+            ${d.gastoTotal > 0 ? `<div class="bar-col-val" style="bottom: calc(${hTotal}\% + 5px)">${fmtMoeda(d.gastoTotal)}</div>` : ''}
+            <div class="bar-col-fill fifa-fuel" style="height:${hComb}%; border-radius: 4px 4px 0 0;" title="Combustível: ${fmtMoeda(d.gastoComb)}"></div>
+            <div class="bar-col-fill fifa-office" style="height:${hOficina}%; border-radius: ${hComb === 0 ? '4px 4px 0 0' : '0'};" title="Oficina: ${fmtMoeda(d.gastoOfic)}"></div>
           </div>
-          <div class="bar-track" title="Distância rodada: ${fmtKm(d.km)}">
+          <!-- COLUNA 2: RODAGEM AZUL -->
+          <div class="bar-track">
             ${d.km > 0 ? `<div class="bar-col-val" style="bottom: calc(${hKm}\% + 5px)">${fmtKm(d.km)}</div>` : ''}
-            <div class="bar-col-fill blue" style="height:${hKm}%"></div>
+            <div class="bar-col-fill fifa-km" style="height:${hKm}%; border-radius: 4px 4px 0 0;" title="Rodagem: ${fmtKm(d.km)}"></div>
           </div>
         </div>
         <div class="bar-col-label">${d.placa}</div>
@@ -809,75 +920,28 @@ function renderDashboard() {
   chartHTML += `</div>`;
   document.getElementById('dashChartVertical').innerHTML = chartHTML;
 
+  const mediaKmDia = diasCobertosGeral > 0 ? Math.round(kmEstimadoGeral / diasCobertosGeral) : 0;
+
   let custoKmGlobal = 'R$ 0,00 / km';
-  if (kmGeral > 0) {
-     let calc = gastoGeral / kmGeral;
-     if (calc > 0 && calc < 0.01) {
-         custoKmGlobal = calc.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 4 }) + ' / km';
-     } else {
-         custoKmGlobal = fmtMoeda(calc) + ' / km';
-     }
+  if (kmGeralMatematica > 0) {
+     let calc = gastoGeral / kmGeralMatematica;
+     custoKmGlobal = (calc > 0 && calc < 0.01) ? calc.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 4 }) + ' / km' : fmtMoeda(calc) + ' / km';
   }
   
+  let consumoMedio = (litrosGerais > 0 && kmGeralMatematica > 0) ? (kmGeralMatematica / litrosGerais).toFixed(2) + ' Km/L' : '-';
+
   document.getElementById('dashKpis').innerHTML = `
-    <div class="kpi"><div class="label">Gasto no Período</div><div class="value">${fmtMoeda(gastoGeral)}</div></div>
-    <div class="kpi"><div class="label">Nº Visitas Oficina</div><div class="value">${manutGeral}</div></div>
-    <div class="kpi" title="Calculado dividindo o Gasto Total pela Distância Rodada no período"><div class="label">Custo por Km Rodado</div><div class="value" style="color:var(--primary)">${custoKmGlobal}</div></div>
+    <div class="kpi"><div class="label">Média estimada diária</div><div class="value">${fmtKm(mediaKmDia)}</div></div>
+    <div class="kpi"><div class="label">Gasto Analisado (Comb. + Peças)</div><div class="value">${fmtMoeda(gastoGeral)}</div></div>
+    <div class="kpi"><div class="label">Visitas à Oficina</div><div class="value">${manutGeral}</div></div>
+    <div class="kpi"><div class="label">Consumo de Combustível</div><div class="value" style="color:var(--warning)">${consumoMedio}</div></div>
+    <div class="kpi" title="Calculado dividindo o Custo Analisado (Comb. + Peças) pela Rodagem Real no período"><div class="label">Custo por Km Rodado</div><div class="value" style="color:var(--primary)">${custoKmGlobal}</div></div>
   `;
 
   renderDashboardCiclos();
 }
 
-function renderDashboardCiclos() {
-  preencherFiltroCiclo();
-  const tipoNome = document.getElementById('dashFiltroCiclo').value;
-  if (!tipoNome) return;
-  
-  const chaveBusca = normPeca(tipoNome);
-  const veiculo = document.getElementById('dashVeiculo').value;
-  let html = `<div class="dash-table-wrap"><table class="dash-table"><thead><tr><th>Placa</th><th>Qtd. Trocas</th><th>Ciclo Praticado</th><th>Lembrete Configurado</th><th>Diagnóstico</th></tr></thead><tbody>`;
-
-  db.veiculos.forEach(v => {
-      if (veiculo !== 'todos' && v.placa !== veiculo) return;
-      
-      let msV = db.manutencoes.filter(m => {
-          let t = m.tipo === 'outro' ? m.descricao : TIPOS[m.tipo] || m.tipo;
-          return m.placa === v.placa && normPeca(t) === chaveBusca;
-      }).sort((a,b) => a.km - b.km);
-
-      let ocorrencias = msV.length;
-      let cicloMedio = 0;
-      if (ocorrencias >= 2) cicloMedio = (msV[ocorrencias-1].km - msV[0].km) / (ocorrencias - 1);
-      
-      let tipoKey = Object.keys(TIPOS).find(k => normPeca(TIPOS[k]) === chaveBusca);
-      let cfg = (tipoKey && db.limites[v.placa] && db.limites[v.placa][tipoKey]) ? db.limites[v.placa][tipoKey].km : 0;
-      
-      let avaliacao = '-';
-      if (cicloMedio > 0 && cfg > 0) {
-          let diff = cicloMedio - cfg;
-          if (diff > cfg * 0.1) avaliacao = `<span style="color:var(--danger)">⚠️ Atrasando ciclo (+${fmtKm(diff)})</span>`;
-          else if (diff < -cfg * 0.1) avaliacao = `<span style="color:var(--warning)">Trocando adiantado (${fmtKm(diff)})</span>`;
-          else avaliacao = `<span style="color:var(--success)">✅ Rigoroso no prazo</span>`;
-      } else if (cicloMedio > 0) {
-          avaliacao = `<span style="color:var(--dim)">Sem meta definida</span>`;
-      }
-
-      if (ocorrencias > 0) {
-          html += `<tr>
-             <td><b>${v.placa}</b></td>
-             <td>${ocorrencias}</td>
-             <td><b>${cicloMedio > 0 ? fmtKm(Math.round(cicloMedio)) : 'Aguardando 2ª troca...'}</b></td>
-             <td>${cfg > 0 ? fmtKm(cfg) : '-'}</td>
-             <td>${avaliacao}</td>
-          </tr>`;
-      }
-  });
-  
-  html += `</tbody></table></div>`;
-  document.getElementById('dashCiclosTabela').innerHTML = html;
-}
-
-/* ================= ABA 4: ALERTAS (ESPELHO DO HISTÓRICO) ================= */
+/* ================= ABA 4: ALERTAS ================= */
 async function marcarResolvido(id) { 
   const a = db.alertas.find(x => x.id === id); if (!a) return;
   const v = db.veiculos.find(x => x.placa === a.placa);
@@ -941,12 +1005,10 @@ function montarCardAlerta(a) {
 }
 
 function montarCardAgAtrasado(ag) { 
-    const isAdmin = (localStorage.getItem("perfilUsuario") || "admin") !== "mecanico";
     return `<div class="alert-card atrasado"><div class="alert-info"><div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div><div class="alert-sub" style="color:var(--danger); font-weight:bold;">⚠️ Atrasado: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div></div><div class="alert-actions"><button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button><button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button><button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button></div></div>`; 
 }
 
 function montarCardAgPendente(ag) { 
-    const isAdmin = (localStorage.getItem("perfilUsuario") || "admin") !== "mecanico";
     return `<div class="alert-card pendente"><div class="alert-info"><div class="alert-title">${ag.placa} — ${(ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo)}</div><div class="alert-sub">Agendado para: ${ag.dataPrevista ? fmtData(ag.dataPrevista) : '-'}</div></div><div class="alert-actions"><button class="btn small secondary" onclick="iniciarAnaliseAgendamento('${ag.id}')">Em andamento</button><button class="btn small" onclick="resolverAgendamento('${ag.id}')">Resolvido</button><button class="btn small secondary" onclick="editarAgendamento('${ag.id}')">Editar</button></div></div>`; 
 }
 
@@ -954,26 +1016,47 @@ function renderAlertas() {
   const s = document.getElementById('tab-alertas'); if (!s) return; 
   let filtroInput = document.getElementById('filtroPlacaAlerta'); const card = s.querySelector('.card');
   if (!filtroInput && card) {
-    filtroInput = document.createElement('input'); filtroInput.type = 'text'; filtroInput.id = 'filtroPlacaAlerta'; filtroInput.placeholder = '🔎 Filtrar por placa...'; filtroInput.style.marginBottom = '16px'; filtroInput.oninput = renderAlertas;
+    filtroInput = document.createElement('input'); filtroInput.type = 'text'; filtroInput.id = 'filtroPlacaAlerta'; 
+    filtroInput.placeholder = '🔎 Filtrar por placa ou serviço...'; 
+    filtroInput.style.marginBottom = '16px'; filtroInput.oninput = renderAlertas;
     const listaAtual = card.querySelector('#alertasLista'); if (listaAtual) card.insertBefore(filtroInput, listaAtual); else card.appendChild(filtroInput);
   }
   let c = document.getElementById('alertasLista'); if (!c && card) { c = document.createElement('div'); c.id = 'alertasLista'; card.appendChild(c); }
-  const termo = filtroInput ? filtroInput.value.trim().toUpperCase() : '';
+  
+  const termoOriginal = filtroInput ? filtroInput.value.trim().toUpperCase() : '';
+  const termoLimpo = termoOriginal.normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+  
   let baseAgs = db.agendamentos.filter(ag => { const tipoMapeado = ag.tipo === 'outro' ? (ag.descricao || 'outro') : ag.tipo; return !db.alertas.some(a => a.placa === ag.placa && normPeca(a.tipo) === normPeca(tipoMapeado) && a.status !== 'resolvido'); });
-  let baseAlertas = db.alertas;
+  let baseAlertas = db.alertas.filter(a => a.tipo !== 'Registro de KM');
 
-  if (termo) { baseAgs = baseAgs.filter(ag => ag.placa.includes(termo)); baseAlertas = baseAlertas.filter(a => a.placa.includes(termo)); }
+  if (termoLimpo) { 
+    baseAgs = baseAgs.filter(ag => {
+        const desc = (ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo);
+        const textoBusca = (ag.placa + " " + desc).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+        return textoBusca.includes(termoLimpo);
+    }); 
+    baseAlertas = baseAlertas.filter(a => {
+        const desc = nomeTipo(a.tipo);
+        const textoBusca = (a.placa + " " + desc).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+        return textoBusca.includes(termoLimpo);
+    }); 
+  }
 
   const g = { atrasado: [], pendente: [], andamento: [], resolvido: [] };
   baseAlertas.forEach(a => g[grupoAlerta(a)].push(a));
   
-  // AQUI FOI APLICADO O FILTRO: Exclui as atualizações silenciosas da aba de alertas
   const resolvidosComputados = db.manutencoes
       .filter(m => m.descricao !== 'Registro de KM')
       .map(m => ({ id: m.id, placa: m.placa, tipo: m.tipo === 'outro' ? m.descricao : m.tipo, status: 'resolvido', dataResolucao: m.data }));
       
   g.resolvido = resolvidosComputados.sort((a,b) => new Date(b.dataResolucao) - new Date(a.dataResolucao));
-  if (termo) g.resolvido = g.resolvido.filter(a => a.placa.includes(termo));
+  
+  if (termoLimpo) {
+      g.resolvido = g.resolvido.filter(a => {
+         const textoBusca = (a.placa + " " + a.tipo).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, "");
+         return textoBusca.includes(termoLimpo);
+      });
+  }
 
   if (baseAlertas.length === 0 && baseAgs.length === 0 && g.resolvido.length === 0) { c.innerHTML = '<p class="empty">Nenhum alerta encontrado. ✅</p>'; return; }
 
@@ -992,3 +1075,97 @@ function filtrarHistorico() {
 }
 
 iniciar();
+
+
+/* ================= DASHBOARD CICLOS / REPETIÇÃO ================= */
+function renderDashboardCiclos() {
+  const sel = document.getElementById('dashFiltroCiclo');
+  if (!sel) return;
+
+  const servicosSet = new Set();
+  db.manutencoes.forEach(m => {
+    if (m.descricao !== 'Registro de KM' && m.tipo !== 'abastecimento') {
+      let nomeServico = m.tipo === 'outro' ? m.descricao : (TIPOS[m.tipo] || m.tipo);
+      if (nomeServico) servicosSet.add(nomeServico);
+    }
+  });
+
+  const servicosArray = Array.from(servicosSet).sort();
+  const atual = sel.value;
+  const resEl = document.getElementById('dashCiclosTabela');
+
+  if (servicosArray.length === 0) {
+    sel.innerHTML = '<option value="">Nenhum serviço registrado</option>';
+    if (resEl) resEl.innerHTML = '<div class="empty" style="padding: 15px; font-size: 13px; color: var(--dim);">As médias de repetição aparecerão aqui assim que houver manutenções cadastradas.</div>';
+    return;
+  }
+
+  sel.innerHTML = '<option value="">Selecione um serviço ou peça...</option>' + servicosArray.map(s => `<option value="${s}">${s}</option>`).join('');
+  
+  if ([...sel.options].some(o => o.value === atual)) {
+    sel.value = atual;
+  }
+
+  if (sel.value && typeof calcularCicloServico === 'function') {
+    calcularCicloServico(sel.value);
+  } else if (resEl && !sel.value) {
+    resEl.innerHTML = '<div class="empty" style="padding: 15px; font-size: 13px; color: var(--dim);">Selecione um item acima para ver o intervalo médio de troca por veículo.</div>';
+  }
+}
+
+function calcularCicloServico(servicoNome) {
+  const resEl = document.getElementById('dashCiclosTabela');
+  if (!resEl || !servicoNome) return;
+
+  const termoBusca = normPeca(servicoNome);
+  const historico = db.manutencoes.filter(m => {
+    let nomeServico = m.tipo === 'outro' ? m.descricao : (TIPOS[m.tipo] || m.tipo);
+    return normPeca(nomeServico) === termoBusca;
+  });
+
+  if (historico.length === 0) {
+    resEl.innerHTML = `<div class="empty" style="padding: 15px; font-size: 13px; color: var(--dim);">Nenhum registro encontrado para "${servicoNome}".</div>`;
+    return;
+  }
+
+  // Agrupa os registros por veículo (placa)
+  const porVeiculo = {};
+  historico.forEach(m => {
+    if (!porVeiculo[m.placa]) porVeiculo[m.placa] = [];
+    porVeiculo[m.placa].push(m);
+  });
+
+  let htmlResult = `<div style="display: flex; flex-direction: column; gap: 10px; margin-top: 10px;">`;
+
+  Object.keys(porVeiculo).sort().forEach(placa => {
+    const manutencoesPlaca = porVeiculo[placa].sort((a, b) => new Date(a.data) - new Date(b.data));
+    
+    let somaKm = 0;
+    let contagemIntervalos = 0;
+    for (let i = 1; i < manutencoesPlaca.length; i++) {
+      let diffKm = manutencoesPlaca[i].km - manutencoesPlaca[i-1].km;
+      if (diffKm > 0) {
+        somaKm += diffKm;
+        contagemIntervalos++;
+      }
+    }
+
+    let mediaKmPlaca = contagemIntervalos > 0 ? Math.round(somaKm / contagemIntervalos) : 0;
+
+    htmlResult += `
+      <div style="background: var(--surface-card, #f8fafc); padding: 12px 15px; border-radius: 6px; border: 1px solid var(--border, #e2e8f0); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-weight: 600; color: var(--primary); margin-bottom: 4px; font-size: 15px;">🚛 Placa: ${placa}</div>
+          <div style="font-size: 13px; color: var(--text);">Média de Troca: <b>${mediaKmPlaca > 0 ? '~' + fmtKm(mediaKmPlaca) : 'Dados insuficientes para média'}</b></div>
+        </div>
+        <div style="font-size: 12px; color: var(--dim); text-align: right;">
+          ${manutencoesPlaca.length} intervenção(ões) registrada(s)<br>
+          Última em: ${fmtData(manutencoesPlaca[manutencoesPlaca.length - 1].data)} (${fmtKm(manutencoesPlaca[manutencoesPlaca.length - 1].km)})
+        </div>
+      </div>
+    `;
+  });
+
+  htmlResult += `</div>`;
+  resEl.innerHTML = htmlResult;
+}
