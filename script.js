@@ -320,7 +320,7 @@ function openModal(id) { document.getElementById(id).classList.add('show'); }
 function nomeTipo(t) { return TIPOS[t] || t; }
 function nomeManutencao(item) {
   const tipo = String(item?.tipo || '').trim().toLowerCase();
-  if (tipo === 'outro') return String(item?.descricao || item?.['descrição'] || item?.['Descricao'] || item?.['Descrição'] || '').trim() || 'Outro';
+  if (tipo === 'outro') return String(item?.descricao || item?.['descrição'] || item?.['Descricao'] || item?.['Descrição'] || item?.['descriçao'] || item?.['Descriçao'] || '').trim() || 'Outro';
   return TIPOS[tipo] || item?.tipo || 'Outro';
 }
 
@@ -624,7 +624,14 @@ function abrirModalManut(placa, manut, modo) {
   atualizarDatalistServicos(); 
   document.getElementById('manutTitle').textContent = (manut ? 'Editar' : 'Marcar') + ' manutenção — ' + placa;
   document.getElementById('mModo').value = modo || 'realizada'; document.getElementById('mModo').disabled = !!manut;
-  let valTipo = ''; if (manut) valTipo = manut.tipo === 'outro' ? manut.descricao : TIPOS[manut.tipo];
+  let valTipo = ''; 
+if (manut) {
+  if (manut.tipo === 'abastecimento') {
+    valTipo = manut.descricao || 'Abastecimento';
+  } else {
+    valTipo = manut.tipo === 'outro' ? manut.descricao : (TIPOS[manut.tipo] || manut.tipo);
+  }
+}
   document.getElementById('mTipoInput').value = valTipo; 
   document.getElementById('mKm').value = (manut && manut.km > 0) ? Number(manut.km).toLocaleString('pt-BR') : ''; 
   document.getElementById('mData').value = manut ? manut.data : hojeISO(); document.getElementById('mDataPrevista').value = ''; 
@@ -747,7 +754,7 @@ function cancelarAgendamento(id) {
   db.agendamentos = db.agendamentos.filter(a => a.id !== id); salvarCache(); renderTelaAtual(); toast('Cancelado...'); execBackground(async () => { await apiPost('deleteAgendamento', { id }); }, 'Erro cancelar'); 
 }
 
-/* ================= ABA 3: DASHBOARD ANALÍTICO (R$/KM E CICLOS) ================= */
+/* ================= ABA 3: DASHBOARD ANALÍTICO ================= */
 
 window.limparFiltroDatasDashboard = function() {
   document.getElementById('dashDataInicio').value = '';
@@ -755,11 +762,6 @@ window.limparFiltroDatasDashboard = function() {
   renderDashboard();
 }
 
-/**
- * Estima a distância rodada em um intervalo.
- * Entre duas leituras de odômetro, distribui a diferença uniformemente
- * pelos dias decorridos.
- */
 function estimarKmNoPeriodo(veiculo, manutencoes, inicioISO, fimISO) {
   const leiturasPorData = new Map();
 
@@ -823,7 +825,6 @@ function estimarKmNoPeriodo(veiculo, manutencoes, inicioISO, fimISO) {
   };
 }
 
-/* ================= ABA 3: DASHBOARD ANALÍTICO (FUNÇÃO ÚNICA BLINDADA) ================= */
 function renderDashboard() {
   const sel = document.getElementById('dashVeiculo'), atual = sel ? sel.value : 'todos'; 
   sel.innerHTML = '<option value="todos">Todos os veículos</option>' + db.veiculos.map(v => `<option value="${v.placa}">${v.placa}</option>`).join(''); 
@@ -1076,7 +1077,6 @@ function filtrarHistorico() {
 
 iniciar();
 
-
 /* ================= DASHBOARD CICLOS / REPETIÇÃO ================= */
 function renderDashboardCiclos() {
   const sel = document.getElementById('dashFiltroCiclo');
@@ -1128,7 +1128,6 @@ function calcularCicloServico(servicoNome) {
     return;
   }
 
-  // Agrupa os registros por veículo (placa)
   const porVeiculo = {};
   historico.forEach(m => {
     if (!porVeiculo[m.placa]) porVeiculo[m.placa] = [];
