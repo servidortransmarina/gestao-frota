@@ -277,3 +277,90 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
   color: #111827; font-size: 13px; font-weight: 800; white-space: nowrap; z-index: 5; pointer-events: none;
 }
 .bar-col-label { margin-top: 10px; font-size: 12px; font-weight: 700; text-align: center; color: var(--text); }
+
+/* ================= AJUSTES DE RESPONSIVIDADE E MOBILE ================= */
+
+/* Força as placas a ficarem sempre centralizadas, independente da tela */
+#chipsVeiculos {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 15px;
+}
+
+@media (max-width: 768px) {
+  /* 1. Organiza o Cabeçalho */
+  header {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 15px 10px;
+    gap: 12px;
+  }
+  
+  .header-left {
+    flex-direction: column;
+    justify-content: center;
+    width: 100%;
+  }
+  
+  .header-logo {
+    margin-right: 0;
+    margin-bottom: 8px;
+    height: 35px; /* Ajuste se a logo ficar muito grande */
+  }
+  
+  .header-right {
+    width: 100%;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  
+  /* Esconde a hora no mobile para economizar espaço valioso */
+  #dateNow {
+    display: none; 
+  }
+  
+  /* 2. Menu em Carrossel (Scroll Lateral) */
+  nav {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 10px;
+    gap: 8px;
+    /* Suaviza o deslizar no touch */
+    -webkit-overflow-scrolling: touch; 
+    /* Esconde a barra de rolagem (Chrome/Safari) */
+    scrollbar-width: none; 
+  }
+  nav::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .navbtn {
+    flex: 0 0 auto; /* Impede os botões de encolherem */
+    font-size: 13px;
+    padding: 10px 16px;
+    white-space: nowrap;
+  }
+
+  /* 3. Ajustes de Tela (Card e Espaçamentos) */
+  main {
+    padding: 10px;
+  }
+  
+  .card {
+    padding: 15px;
+  }
+  
+  /* Centraliza botões e inputs de formulário no mobile */
+  .modal-actions {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .modal-actions .btn {
+    width: 100%;
+    margin: 0;
+  }
+}
