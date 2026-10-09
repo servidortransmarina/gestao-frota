@@ -806,14 +806,26 @@ function estimarKmNoPeriodo(veiculo, manutencoes, inicioISO, fimISO) {
 
     if (diasEntreLeituras <= 0 || atual.km <= anterior.km) continue;
 
+    let kmEntreLeituras = atual.km - anterior.km;
+
+    // ==========================================
+    // 🛑 TRATAMENTO INTELIGENTE DE SALTO / CORREÇÃO:
+    // Se a diferença entre duas leituras for maior que 5.000 km de uma só vez,
+    // é a correção manual de base do odômetro. Tratamos esse salto como 0 km
+    // para não gerar rodagem falsa, sem descartar os demais dados do posto.
+    // ==========================================
+    if (kmEntreLeituras > 5000) {
+      kmEntreLeituras = 0; 
+    }
+
+    const kmPorDia = kmEntreLeituras / diasEntreLeituras;
+
     const inicioSobreposto = Math.max(inicio.getTime(), anterior.dia.getTime());
     const fimSobreposto = Math.min(fimExclusivo.getTime(), atual.dia.getTime());
 
     if (fimSobreposto <= inicioSobreposto) continue;
 
     const diasSobrepostos = (fimSobreposto - inicioSobreposto) / (24 * 60 * 60 * 1000);
-    const kmEntreLeituras = atual.km - anterior.km;
-    const kmPorDia = kmEntreLeituras / diasEntreLeituras;
 
     kmEstimado += kmPorDia * diasSobrepostos;
     diasCobertos += diasSobrepostos;
