@@ -364,3 +364,57 @@ th { color: var(--dim); font-size: 11px; text-transform: uppercase; font-weight:
     margin: 0;
   }
 }
+
+/* ==============================================
+   AJUSTES: TABELA RESPONSIVA E BOTÃO DE IMPRESSÃO
+   ============================================== */
+
+.tabela-responsiva {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch; /* Rolagem suave no celular */
+  margin-top: 10px;
+}
+
+/* Força a quebra de texto longo (como a coluna de Observação) para não esticar a tela */
+td {
+  word-wrap: break-word;
+  word-break: break-word;
+  white-space: normal;
+}
+
+/* Garante que a coluna de Observação tenha um espaço mínimo agradável */
+td:nth-child(5) {
+  min-width: 180px;
+}
+
+/* Estilização para o novo botão de imprimir do cabeçalho */
+.btn-imprimir {
+  background: #4B5563; /* Cinza elegante, destaca sem brigar com os azuis */
+  color: #ffffff;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.btn-imprimir:hover {
+  background: #374151;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px rgba(0,0,0,0.15);
+}
+
+@media (max-width: 768px) {
+  .btn-imprimir {
+    width: 100%;
+    justify-content: center;
+    margin-bottom: 5px;
+  }
+}
