@@ -552,6 +552,7 @@ function renderDetalhe() {
     if (txtKm && txtData) return `${txtKm} ou ${txtData}`;
     return txtKm || txtData || '-';
   };
+  
   const cardsTipos = TIPOS_RASTREADOS.map(t => { const ult = ultimaManut(placa, t); return `<div class="kpi"><div class="label">${LABEL_ULTIMA[t]}</div><div class="value" style="font-size:15px;">${ult ? fmtData(ult.data) + ' · ' + fmtKm(ult.km) : 'Sem registro'}</div></div>`; }).join('');
   const perfil = localStorage.getItem("perfilUsuario") || "admin"; const isAdmin = perfil !== "mecanico";
   const isMercosul = /^[A-Z]{3}[0-9][A-Z][0-9]{2}$/.test(placa); const classePlaca = isMercosul ? 'mercosul' : 'antiga'; const nomeTopo = isMercosul ? 'BRASIL' : 'TRANSMARINA';
@@ -584,14 +585,19 @@ function renderDetalhe() {
     
     <div class="card">
       <div class="header-tabela"><h2>Histórico</h2><input type="text" id="filtroHistorico" placeholder="🔎 Pesquisar manutenção..." onkeyup="filtrarHistorico()"></div>
-      <table id="tabelaHistorico">
-        <thead><tr><th>Tipo</th><th>Data</th><th>KM Registrado</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
-        <tbody>
-          ${msUi.map(m => `<tr title="👤 Última alteração: ${m.nome || 'Não identificado'}"><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td><div style="font-size: 10px; color: var(--dim); text-transform: uppercase;">Apurado com</div><div style="font-weight: 600;">${fmtKm(m.km)}</div></td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td><td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> ${isAdmin ? `<button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button>` : ''}</td></tr>`).join('')}
-        </tbody>
-      </table>
+      
+      <!-- AQUI É ONDE ENVELOPAMOS A TABELA PARA O CELULAR ROLAR -->
+      <div class="tabela-responsiva">
+        <table id="tabelaHistorico">
+          <thead><tr><th>Tipo</th><th>Data</th><th>KM Registrado</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead>
+          <tbody>
+            ${msUi.map(m => `<tr title="👤 Última alteração: ${m.nome || 'Não identificado'}"><td>${nomeManutencao(m)}</td><td>${fmtData(m.data)}</td><td><div style="font-size: 10px; color: var(--dim); text-transform: uppercase;">Apurado com</div><div style="font-weight: 600;">${fmtKm(m.km)}</div></td><td>${fmtMoeda(m.valor)}</td><td>${m.observacao || '-'}</td><td><button class="btn secondary small" onclick="editarManutencao('${m.id}')">Editar</button> ${isAdmin ? `<button class="btn danger small" onclick="excluirManutencao('${m.id}')">Excluir</button>` : ''}</td></tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      
     </div>
-    ${agends.length ? `<div class="card"><h2>Agendadas</h2><table><thead><tr><th>Tipo</th><th>Previsão</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead><tbody>${agends.map(g => `<tr title="👤 Registrado por: ${g.nome || 'Não identificado'}"><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td><td><button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button> <button class="btn secondary small" onclick="editarAgendamento('${g.id}')">Editar</button> ${isAdmin ? `<button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${agends.length ? `<div class="card"><h2>Agendadas</h2><div class="tabela-responsiva"><table><thead><tr><th>Tipo</th><th>Previsão</th><th>Valor</th><th>Obs</th><th>Ações</th></tr></thead><tbody>${agends.map(g => `<tr title="👤 Registrado por: ${g.nome || 'Não identificado'}"><td>${nomeManutencao(g)}</td><td>${g.dataPrevista ? fmtData(g.dataPrevista) : '-'}</td><td>${g.valor ? fmtMoeda(g.valor) : '-'}</td><td>${g.observacao || '-'}</td><td><button class="btn success small" onclick="resolverAgendamento('${g.id}')">Resolvido</button> <button class="btn secondary small" onclick="editarAgendamento('${g.id}')">Editar</button> ${isAdmin ? `<button class="btn danger small" onclick="cancelarAgendamento('${g.id}')">Cancelar</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>` : ''}
   `;
 }
 
@@ -1179,4 +1185,154 @@ function calcularCicloServico(servicoNome) {
 
   htmlResult += `</div>`;
   resEl.innerHTML = htmlResult;
+}
+
+
+/* =======================================================
+   FUNÇÃO DE IMPRESSÃO (Aviso de Serviço para Oficina)
+   ======================================================= */
+function imprimirRelatorioMecanico() {
+    // 1. Busca alertas pendentes, ignorando os que são por "falta de lançamento"
+    const alertasPendentes = db.alertas.filter(a => {
+        if (a.status === 'resolvido' || a.tipo === 'Registro de KM') return false;
+        const temHistorico = ultimaManut(a.placa, a.tipo);
+        return temHistorico !== null;
+    });
+    
+    // 2. Busca agendamentos pendentes
+    const agendamentosPendentes = db.agendamentos.filter(ag => !db.alertas.some(a => a.placa === ag.placa && normPeca(a.tipo) === normPeca(ag.tipo === 'outro' ? ag.descricao : ag.tipo) && a.status !== 'resolvido'));
+
+    if (alertasPendentes.length === 0 && agendamentosPendentes.length === 0) {
+        alert("✅ Nenhum serviço realmente expirado ou agendado no momento. Os alertas visíveis são apenas por falta de histórico.");
+        return;
+    }
+
+    let htmlImp = `
+        <html>
+        <head>
+            <title>Ordem de Manutenção</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; color: #000; }
+                h1 { text-align: center; border-bottom: 2px solid #000; padding-bottom: 10px; text-transform: uppercase; }
+                .data-emissao { text-align: right; margin-bottom: 20px; font-size: 14px; color: #333; }
+                .item-alerta {
+                    border: 2px solid #000;
+                    margin-bottom: 20px;
+                    padding: 15px;
+                    border-radius: 8px;
+                    page-break-inside: avoid;
+                }
+                .placa { font-size: 26px; font-weight: bold; margin-bottom: 10px; }
+                
+                /* Ajuste para o checkbox ficar alinhado ao texto */
+                .servico { font-size: 22px; margin-bottom: 15px; display: flex; align-items: center; gap: 10px; }
+                
+                /* O quadrado para dar o check de caneta */
+                .checkbox {
+                    width: 30px;
+                    height: 30px;
+                    border: 3px solid #000;
+                    border-radius: 4px;
+                    display: inline-block;
+                }
+
+                .info-bloco { 
+                    margin-top: 15px; 
+                    border-top: 1px dashed #666; 
+                    padding-top: 15px; 
+                    font-size: 18px; 
+                    line-height: 1.6;
+                }
+                .info-label { color: #555; }
+                .info-val { font-weight: bold; }
+                .assinatura { margin-top: 60px; text-align: center; font-size: 18px; font-weight: bold; }
+                .linha-ass { border-top: 2px solid #000; width: 400px; margin: 0 auto; padding-top: 5px; }
+                @media print {
+                    @page { margin: 1cm; }
+                }
+            </style>
+        </head>
+        <body>
+            <h1>🔧 Aviso de Serviço - Oficina</h1>
+            <div class="data-emissao">Impresso em: ${new Date().toLocaleDateString('pt-BR')}</div>
+    `;
+
+    // Constrói o bloco de impressão simplificado
+    const renderBloco = (placa, servicoStr, ultimaTrocaStr, expiracaoStr) => {
+        return `
+            <div class="item-alerta">
+                <div class="placa">🚛 Placa: ${placa}</div>
+                <div class="servico">
+                    <div class="checkbox"></div> ⚠️ Serviço: <strong>${servicoStr}</strong>
+                </div>
+                <div class="info-bloco">
+                    <span class="info-label">Última Troca:</span> <span class="info-val">${ultimaTrocaStr}</span><br>
+                    <span class="info-label">Situação atual:</span> <span class="info-val">${expiracaoStr}</span>
+                </div>
+            </div>
+        `;
+    };
+
+    alertasPendentes.forEach(alerta => {
+        const v = db.veiculos.find(x => x.placa === alerta.placa);
+        const kmAtual = v ? v.kmAtual : 0;
+        const info = calcularLimite(alerta.placa, alerta.tipo);
+        
+        let ultimaTrocaStr = "Sem histórico";
+        let expiracaoStr = "-";
+        
+        if (info && info.temUltima) {
+            ultimaTrocaStr = `${fmtData(info.ultima.data)} (Aos ${fmtKm(info.ultima.km)})`;
+            
+            let txtKm = '';
+            let txtData = '';
+            
+            if (info.limiteKm !== null) {
+                const faltaKm = info.limiteKm - kmAtual;
+                txtKm = faltaKm >= 0 ? `Faltam ${fmtKm(faltaKm)}` : `Excedido há ${fmtKm(-faltaKm)}`;
+            }
+            
+            if (info.limiteData !== null) {
+                const hojeObj = new Date(hojeISO() + 'T00:00:00');
+                const limiteObj = new Date(info.limiteData + 'T00:00:00');
+                const diffDias = Math.round((limiteObj - hojeObj) / (1000 * 60 * 60 * 24));
+                txtData = diffDias >= 0 ? `Faltam ${diffDias} dias` : `Excedido há ${-diffDias} dias`;
+            }
+            
+            if (info.cfg.modo === 'km') expiracaoStr = txtKm;
+            else if (info.cfg.modo === 'meses') expiracaoStr = txtData;
+            else expiracaoStr = `${txtKm} | ${txtData}`;
+        }
+
+        htmlImp += renderBloco(alerta.placa, nomeTipo(alerta.tipo).toUpperCase(), ultimaTrocaStr, expiracaoStr);
+    });
+    
+    agendamentosPendentes.forEach(ag => {
+        const servicoNome = (ag.tipo === 'outro' && ag.descricao) ? ag.descricao : nomeTipo(ag.tipo);
+        
+        const historicoAnterior = ultimaManut(ag.placa, ag.tipo === 'outro' ? ag.descricao : ag.tipo);
+        const ultimaTrocaStr = historicoAnterior ? `${fmtData(historicoAnterior.data)} (Aos ${fmtKm(historicoAnterior.km)})` : "Serviço Avulso (Sem histórico)";
+        
+        const expiracaoStr = ag.dataPrevista ? `Agendado para ${fmtData(ag.dataPrevista)}` : `Agendamento pendente`;
+
+        htmlImp += renderBloco(ag.placa, servicoNome.toUpperCase() + " (AGENDADO)", ultimaTrocaStr, expiracaoStr);
+    });
+
+    htmlImp += `
+            <div class="assinatura">
+                <br><br><br>
+                <div class="linha-ass">Visto da Oficina</div>
+            </div>
+        </body>
+        </html>
+    `;
+
+    const janelaImpressao = window.open('', '_blank', 'width=800,height=600');
+    janelaImpressao.document.write(htmlImp);
+    janelaImpressao.document.close();
+    janelaImpressao.focus();
+    
+    setTimeout(() => {
+        janelaImpressao.print();
+    }, 500);
 }
